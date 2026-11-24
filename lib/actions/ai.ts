@@ -1,8 +1,8 @@
 "use server";
 
 import { z } from "zod";
-import { generateObject, generateText } from "ai";
-import { getGeminiModel } from "@/lib/ai/client";
+import { generateText, Output } from "ai";
+import { getGoogleClient, runWithModelFallback } from "@/lib/ai/client";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
 
@@ -21,44 +21,50 @@ const bedahSchema = z.object({
 });
 
 /**
- * AI Auto-Bedah: Extracts hook, classification, visual notes, and original adaptation ideas.
+ * AI Auto-Breakdown: Extracts hook, classification, visual notes, and original adaptation ideas.
  */
 export async function aiBedahReference(
   input: z.infer<typeof bedahSchema>
 ): Promise<ActionResult<BedahResult>> {
   await requireActionOwner();
 
-  const model = getGeminiModel();
-  if (!model) {
+  const google = getGoogleClient();
+  if (!google) {
     return fail(
       "ai_disabled",
-      "Google Gemini API key belum terpasang. Masukkan API key gratis Anda di .env.local (GOOGLE_GENERATIVE_AI_API_KEY) atau di Settings."
+      "Google Gemini API key is not configured. Please add your free key in .env.local (GOOGLE_GENERATIVE_AI_API_KEY) or in Settings."
     );
   }
 
   try {
-    const { object } = await generateObject({
-      model,
-      schema: z.object({
-        hookText: z.string().describe("Kalimat hook 3 detik pertama yang memikat audiens"),
-        hookType: z.string().describe("Tipe hook (misal: Curiosity Gap, Negative Hook, Bold Claim, Relatable Pain Point)"),
-        visualNotes: z.string().describe("Catatan gaya visual, ritme potongan, transisi, atau b-roll"),
-        keyTakeaway: z.string().describe("Pemicu psikologis utama kenapa video ini berhasil"),
-        adaptIdeas: z.array(z.string()).min(3).max(4).describe("3 ide adaptasi orisinal yang berbeda dari sumber agar tidak plagiasi"),
-        suggestedTags: z.array(z.string()).min(2).max(5).describe("Tag kategori yang relevan"),
-      }),
-      prompt: `Anda adalah pakar bedah konten video viral (Shorts, Reels, TikTok) berbahasa Indonesia.
-Lakukan analisis dan bedah mendalam terhadap konten referensi ini:
+    const output = await runWithModelFallback(async (model) => {
+      const res = await generateText({
+        model,
+        output: Output.object({
+          schema: z.object({
+            hookText: z.string().describe("Opening 3-second hook that captures viewer attention"),
+            hookType: z.string().describe("Hook archetype (e.g. Curiosity Gap, Bold Claim, Contrarian, Relatable Pain Point)"),
+            visualNotes: z.string().describe("Visual styling, pacing, transition, or B-roll cues"),
+            keyTakeaway: z.string().describe("Core psychological trigger why this content succeeded"),
+            adaptIdeas: z.array(z.string()).min(3).max(4).describe("3 original adaptation ideas distinct from source"),
+            suggestedTags: z.array(z.string()).min(2).max(5).describe("Relevant topic category tags"),
+          }),
+        }),
+        prompt: `You are an expert short-form video content strategist and hook breakdown specialist (Reels, Shorts, TikTok).
+Perform an in-depth breakdown of this reference content:
 Platform: ${input.platform || "Social Media"}
-Konten/URL: "${input.text}"
+Content/URL: "${input.text}"
 
-Berikan keluaran dalam bahasa Indonesia dengan nada kreatif, lugas, dan berfokus pada eksekusi konten orisinal.`,
+Provide clear, sharp, actionable breakdown insights focused on original content creation.`,
+      });
+
+      return res.output;
     });
 
-    return ok(object);
+    return ok(output);
   } catch (err: unknown) {
     console.error("AI Bedah error:", err);
-    return fail("ai_failed", "Gagal memproses bedah AI. Periksa kembali kuota atau API key Gemini Anda.");
+    return fail("ai_failed", "Failed to process AI breakdown. Please check your Gemini API key or quota.");
   }
 }
 
@@ -82,38 +88,44 @@ export async function aiGenerateHooks(
 ): Promise<ActionResult<{ hooks: GeneratedHook[] }>> {
   await requireActionOwner();
 
-  const model = getGeminiModel();
-  if (!model) {
+  const google = getGoogleClient();
+  if (!google) {
     return fail(
       "ai_disabled",
-      "Google Gemini API key belum terpasang. Masukkan API key gratis Anda di .env.local (GOOGLE_GENERATIVE_AI_API_KEY)."
+      "Google Gemini API key is not configured. Please add your free key in .env.local (GOOGLE_GENERATIVE_AI_API_KEY)."
     );
   }
 
   try {
-    const { object } = await generateObject({
-      model,
-      schema: z.object({
-        hooks: z.array(
-          z.object({
-            text: z.string().describe("Kalimat hook pembuka 1-2 kalimat (max 12 kata)"),
-            archetype: z.string().describe("Jenis hook: Curiosity, Contrarian, Negative, Challenge, Relatable, dsb"),
-            whyItWorks: z.string().describe("Alasan psikologis singkat kenapa hook ini menghentikan scroll"),
-          })
-        ).min(5).max(7),
-      }),
-      prompt: `Hasilkan 6 variasi hook pembuka video pendek (Reels/TikTok) yang mematikan dan membuat penonton berhenti scrolling.
-Topik: "${input.topic}"
-Pilar Konten: "${input.pillar || "General"}"
+    const output = await runWithModelFallback(async (model) => {
+      const res = await generateText({
+        model,
+        output: Output.object({
+          schema: z.object({
+            hooks: z.array(
+              z.object({
+                text: z.string().describe("Opening hook line, 1-2 punchy sentences (max 14 words)"),
+                archetype: z.string().describe("Hook archetype: Curiosity, Contrarian, Negative, Relatable, Data/Result, Question"),
+                whyItWorks: z.string().describe("Brief psychological reason why this stops the scroll"),
+              })
+            ).min(5).max(7),
+          }),
+        }),
+        prompt: `Generate 6 high-conversion short-form video opening hooks that immediately stop the scroll.
+Topic: "${input.topic}"
+Content Pillar: "${input.pillar || "General"}"
 Format: "${input.format || "Short-form Video"}"
 
-Bahasa: Bahasa Indonesia kasual yang natural, tidak kaku, dan langsung to-the-point.`,
+Tone: Natural, confident, direct, and conversational.`,
+      });
+
+      return res.output;
     });
 
-    return ok(object);
+    return ok(output);
   } catch (err: unknown) {
     console.error("AI Generate Hooks error:", err);
-    return fail("ai_failed", "Gagal menghasilkan hook dengan AI.");
+    return fail("ai_failed", "Failed to generate hooks with AI.");
   }
 }
 
@@ -131,34 +143,38 @@ export async function aiDraftScript(
 ): Promise<ActionResult<{ script: string }>> {
   await requireActionOwner();
 
-  const model = getGeminiModel();
-  if (!model) {
+  const google = getGoogleClient();
+  if (!google) {
     return fail(
       "ai_disabled",
-      "Google Gemini API key belum terpasang. Masukkan API key gratis Anda di .env.local."
+      "Google Gemini API key is not configured. Please add your free key in .env.local."
     );
   }
 
   try {
-    const { text } = await generateText({
-      model,
-      prompt: `Buat naskah video pendek berdurasi 45-60 detik dengan struktur retensi tinggi:
-Judul Konten: "${input.title}"
-Hook Pembuka: "${input.hookText || "Tentukan hook terbaik"}"
-Catatan Konsep: "${input.notes || "Tidak ada catatan tambahan"}"
+    const output = await runWithModelFallback(async (model) => {
+      const { text } = await generateText({
+        model,
+        prompt: `Create a 45-60 second high-retention short-form video production script:
+Content Title: "${input.title}"
+Opening Hook: "${input.hookText || "Craft the strongest opening hook"}"
+Concept Notes: "${input.notes || "None"}"
 
-Format naskah harus terbagi rapi ke dalam 4 bagian:
-1. [00:00 - 00:03] THE HOOK: Kalimat pembuka + visual framing cepat
-2. [00:03 - 00:15] THE PROBLEM / TENSION: Kenapa audiens harus peduli + masalah yang dihadapi
-3. [00:15 - 00:45] THE INSIGHT / VALUE: Solusi nyata (2-3 poin praktis) + petunjuk B-Roll visual
-4. [00:45 - 00:60] THE PAYOFF & CTA: Kesimpulan tajam + ajakan bertindak (komen/save)
+Structure the script into 4 clear production blocks:
+1. [00:00 - 00:03] THE HOOK: Punchy opening line + fast visual framing cue
+2. [00:03 - 00:15] THE PROBLEM / TENSION: Why the viewer must care + the core obstacle
+3. [00:15 - 00:45] THE INSIGHT / VALUE: Practical solution (2-3 crisp points) + B-roll visual directions
+4. [00:45 - 00:60] THE PAYOFF & CTA: Sharp closing takeaway + call to action (comment/save)
 
-Gunakan bahasa Indonesia kasual, modern, dan percaya diri seperti kreator top.`,
+Tone: Confident, fast-paced, high retention.`,
+      });
+
+      return { script: text };
     });
 
-    return ok({ script: text });
+    return ok(output);
   } catch (err: unknown) {
     console.error("AI Draft Script error:", err);
-    return fail("ai_failed", "Gagal menyusun naskah dengan AI.");
+    return fail("ai_failed", "Failed to draft script with AI.");
   }
 }
