@@ -189,23 +189,56 @@ export interface MasterData {
   hookTypes: { id: string; name: string; slug: string }[];
 }
 
+const FALLBACK_MASTER_DATA: MasterData = {
+  platforms: [
+    { id: "instagram", name: "Instagram", slug: "instagram" },
+    { id: "tiktok", name: "TikTok", slug: "tiktok" },
+    { id: "youtube", name: "YouTube", slug: "youtube" },
+    { id: "x", name: "X", slug: "x" },
+    { id: "threads", name: "Threads", slug: "threads" },
+    { id: "other", name: "Other", slug: "other" },
+  ],
+  formats: [
+    { id: "short", name: "Shorts / Reels", slug: "short" },
+    { id: "carousel", name: "Carousel", slug: "carousel" },
+    { id: "post", name: "Single Post", slug: "post" },
+  ],
+  pillars: [
+    { id: "p1", name: "Hook / Pembuka", slug: "hook" },
+    { id: "p2", name: "Edukasi & Tutorial", slug: "edukasi" },
+    { id: "p3", name: "Storytelling", slug: "storytelling" },
+    { id: "p4", name: "Komedi / Relate", slug: "komedi" },
+  ],
+  hookTypes: [
+    { id: "h1", name: "Problem / Rasa Sakit", slug: "problem" },
+    { id: "h2", name: "Pertanyaan Provokatif", slug: "question" },
+    { id: "h3", name: "Hasil Mengejutkan", slug: "result" },
+    { id: "h4", name: "Mitos vs Fakta", slug: "myth" },
+  ],
+};
+
 /**
  * Returns active master data for dropdowns, filters, and forms.
  */
 export async function getMasterData(): Promise<MasterData> {
-  const [platformList, formatList, pillarList, hookTypeList] = await Promise.all([
-    db.select({ id: platforms.id, name: platforms.name, slug: platforms.slug }).from(platforms).orderBy(platforms.name),
-    db.select({ id: formats.id, name: formats.name, slug: formats.slug }).from(formats).orderBy(formats.sortOrder),
-    db.select({ id: pillars.id, name: pillars.name, slug: pillars.slug }).from(pillars).where(eq(pillars.isActive, true)).orderBy(pillars.sortOrder),
-    db.select({ id: hookTypes.id, name: hookTypes.name, slug: hookTypes.slug }).from(hookTypes).orderBy(hookTypes.sortOrder),
-  ]);
+  try {
+    const [platformList, formatList, pillarList, hookTypeList] = await Promise.all([
+      db.select({ id: platforms.id, name: platforms.name, slug: platforms.slug }).from(platforms).orderBy(platforms.name),
+      db.select({ id: formats.id, name: formats.name, slug: formats.slug }).from(formats).orderBy(formats.sortOrder),
+      db.select({ id: pillars.id, name: pillars.name, slug: pillars.slug }).from(pillars).where(eq(pillars.isActive, true)).orderBy(pillars.sortOrder),
+      db.select({ id: hookTypes.id, name: hookTypes.name, slug: hookTypes.slug }).from(hookTypes).orderBy(hookTypes.sortOrder),
+    ]);
 
-  return {
-    platforms: platformList,
-    formats: formatList,
-    pillars: pillarList,
-    hookTypes: hookTypeList,
-  };
+    return {
+      platforms: platformList,
+      formats: formatList,
+      pillars: pillarList,
+      hookTypes: hookTypeList,
+    };
+  } catch (error) {
+    console.warn("Failed to fetch master data from database, using fallback:", error);
+    return FALLBACK_MASTER_DATA;
+  }
 }
 
 export interface ReferenceListItem {
@@ -252,17 +285,18 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
   items: ReferenceListItem[];
   total: number;
 }> {
-  const {
-    status,
-    pillarSlug,
-    platformSlug,
-    formatSlug,
-    unusedOnly,
-    searchText,
-    archived = false,
-    limit = 36,
-    offset = 0,
-  } = params;
+  try {
+    const {
+      status,
+      pillarSlug,
+      platformSlug,
+      formatSlug,
+      unusedOnly,
+      searchText,
+      archived = false,
+      limit = 36,
+      offset = 0,
+    } = params;
 
   const conditions = [];
 
@@ -419,7 +453,11 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
     pillars: pillarMap.get(r.ref.id) || [],
   }));
 
-  return { items, total };
+    return { items, total };
+  } catch (error) {
+    console.warn("Failed to list references (database fallback):", error);
+    return { items: [], total: 0 };
+  }
 }
 
 /**
@@ -434,85 +472,90 @@ export async function getInboxReferences(): Promise<ReferenceListItem[]> {
  * Fetches a single reference with all relations and bedah elements.
  */
 export async function getReferenceById(id: string): Promise<ReferenceListItem | null> {
-  const [row] = await db
-    .select({
-      ref: refs,
-      platform: {
-        id: platforms.id,
-        name: platforms.name,
-        slug: platforms.slug,
-      },
-      format: {
-        id: formats.id,
-        name: formats.name,
-        slug: formats.slug,
-      },
-      hookType: {
-        id: hookTypes.id,
-        name: hookTypes.name,
-        slug: hookTypes.slug,
-      },
-      sourceAccount: {
-        id: sourceAccounts.id,
-        handle: sourceAccounts.handle,
-      },
-      audio: {
-        id: audios.id,
-        title: audios.title,
-        artist: audios.artist,
-      },
-    })
-    .from(refs)
-    .innerJoin(platforms, eq(refs.platformId, platforms.id))
-    .leftJoin(formats, eq(refs.formatId, formats.id))
-    .leftJoin(hookTypes, eq(refs.hookTypeId, hookTypes.id))
-    .leftJoin(sourceAccounts, eq(refs.sourceAccountId, sourceAccounts.id))
-    .leftJoin(audios, eq(refs.audioId, audios.id))
-    .where(eq(refs.id, id))
-    .limit(1);
-
-  if (!row) return null;
-
-  const [refPillarsList, refElementsList] = await Promise.all([
-    db
+  try {
+    const [row] = await db
       .select({
-        id: pillars.id,
-        name: pillars.name,
-        slug: pillars.slug,
+        ref: refs,
+        platform: {
+          id: platforms.id,
+          name: platforms.name,
+          slug: platforms.slug,
+        },
+        format: {
+          id: formats.id,
+          name: formats.name,
+          slug: formats.slug,
+        },
+        hookType: {
+          id: hookTypes.id,
+          name: hookTypes.name,
+          slug: hookTypes.slug,
+        },
+        sourceAccount: {
+          id: sourceAccounts.id,
+          handle: sourceAccounts.handle,
+        },
+        audio: {
+          id: audios.id,
+          title: audios.title,
+          artist: audios.artist,
+        },
       })
-      .from(refPillars)
-      .innerJoin(pillars, eq(refPillars.pillarId, pillars.id))
-      .where(eq(refPillars.refId, id)),
-    db
-      .select({
-        element: refElements.element,
-      })
-      .from(refElements)
-      .where(eq(refElements.refId, id)),
-  ]);
+      .from(refs)
+      .innerJoin(platforms, eq(refs.platformId, platforms.id))
+      .leftJoin(formats, eq(refs.formatId, formats.id))
+      .leftJoin(hookTypes, eq(refs.hookTypeId, hookTypes.id))
+      .leftJoin(sourceAccounts, eq(refs.sourceAccountId, sourceAccounts.id))
+      .leftJoin(audios, eq(refs.audioId, audios.id))
+      .where(eq(refs.id, id))
+      .limit(1);
 
-  return {
-    id: row.ref.id,
-    url: row.ref.url,
-    urlOriginal: row.ref.urlOriginal,
-    status: row.ref.status,
-    summary: row.ref.summary,
-    hookText: row.ref.hookText,
-    visualNotes: row.ref.visualNotes,
-    notes: row.ref.notes,
-    tags: row.ref.tags || [],
-    skippedReason: row.ref.skippedReason,
-    contentId: row.ref.contentId,
-    contentPosition: row.ref.contentPosition,
-    savedAt: row.ref.savedAt,
-    statusChangedAt: row.ref.statusChangedAt,
-    archivedAt: row.ref.archivedAt,
-    platform: row.platform,
-    format: row.format?.id ? row.format : null,
-    hookType: row.hookType?.id ? row.hookType : null,
-    sourceAccount: row.sourceAccount?.id ? row.sourceAccount : null,
-    audio: row.audio?.id ? row.audio : null,
-    pillars: refPillarsList,
-    elements: refElementsList.map((e) => e.element),
-  };
+    if (!row) return null;
+
+    const [refPillarsList, refElementsList] = await Promise.all([
+      db
+        .select({
+          id: pillars.id,
+          name: pillars.name,
+          slug: pillars.slug,
+        })
+        .from(refPillars)
+        .innerJoin(pillars, eq(refPillars.pillarId, pillars.id))
+        .where(eq(refPillars.refId, id)),
+      db
+        .select({
+          element: refElements.element,
+        })
+        .from(refElements)
+        .where(eq(refElements.refId, id)),
+    ]);
+
+    return {
+      id: row.ref.id,
+      url: row.ref.url,
+      urlOriginal: row.ref.urlOriginal,
+      status: row.ref.status,
+      summary: row.ref.summary,
+      hookText: row.ref.hookText,
+      visualNotes: row.ref.visualNotes,
+      notes: row.ref.notes,
+      tags: row.ref.tags || [],
+      skippedReason: row.ref.skippedReason,
+      contentId: row.ref.contentId,
+      contentPosition: row.ref.contentPosition,
+      savedAt: row.ref.savedAt,
+      statusChangedAt: row.ref.statusChangedAt,
+      archivedAt: row.ref.archivedAt,
+      platform: row.platform,
+      format: row.format?.id ? row.format : null,
+      hookType: row.hookType?.id ? row.hookType : null,
+      sourceAccount: row.sourceAccount?.id ? row.sourceAccount : null,
+      audio: row.audio?.id ? row.audio : null,
+      pillars: refPillarsList,
+      elements: refElementsList.map((e) => e.element),
+    };
+  } catch (error) {
+    console.warn(`Failed to get reference by ID ${id} (database fallback):`, error);
+    return null;
+  }
 }

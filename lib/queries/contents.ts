@@ -56,16 +56,17 @@ export async function listContents(params: ListContentsParams = {}): Promise<{
   items: ContentListItem[];
   total: number;
 }> {
-  const {
-    status,
-    pillarSlug,
-    formatSlug,
-    seriesId,
-    searchText,
-    archived = false,
-    limit = 30,
-    offset = 0,
-  } = params;
+  try {
+    const {
+      status,
+      pillarSlug,
+      formatSlug,
+      seriesId,
+      searchText,
+      archived = false,
+      limit = 30,
+      offset = 0,
+    } = params;
 
   const conditions = [];
 
@@ -248,7 +249,11 @@ export async function listContents(params: ListContentsParams = {}): Promise<{
     checklistStats: checklistMap.get(r.content.id) || { total: 0, done: 0 },
   }));
 
-  return { items, total };
+    return { items, total };
+  } catch (error) {
+    console.warn("Failed to list contents (database fallback):", error);
+    return { items: [], total: 0 };
+  }
 }
 
 export interface ContentDetailItem extends ContentListItem {

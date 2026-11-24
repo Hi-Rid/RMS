@@ -41,7 +41,8 @@ export async function listSnapshots(params: ListSnapshotsParams = {}): Promise<{
   items: SnapshotItem[];
   counts: { due: number; upcoming: number; done: number };
 }> {
-  const { filter = "due" } = params;
+  try {
+    const { filter = "due" } = params;
 
   // Query counts for tabs
   const [dueCountRes, upcomingCountRes, doneCountRes] = await Promise.all([
@@ -126,5 +127,9 @@ export async function listSnapshots(params: ListSnapshotsParams = {}): Promise<{
     },
   }));
 
-  return { items, counts };
+    return { items, counts };
+  } catch (error) {
+    console.warn("Failed to list snapshots (database fallback):", error);
+    return { items: [], counts: { due: 0, upcoming: 0, done: 0 } };
+  }
 }
