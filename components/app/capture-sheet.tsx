@@ -164,10 +164,10 @@ export function CaptureSheet({
             <div className="space-y-0.5">
               <span className="font-bold text-foreground font-display flex items-center gap-1.5 text-xs">
                 <Sparkles className="size-3.5 text-amber-500 fill-amber-500" />
-                <span>AI Auto-Bedah (Gemini)</span>
+                <span>AI Auto-Breakdown (Gemini)</span>
               </span>
               <p className="text-[11px] font-mono text-muted-foreground">
-                Ekstrak hook, visual structure & ide adaptasi otomatis
+                Extract hook, visual breakdown & adaptation ideas automatically
               </p>
             </div>
             <Button
@@ -182,7 +182,7 @@ export function CaptureSheet({
               ) : (
                 <Sparkles className="size-3" />
               )}
-              <span>Auto-Bedah</span>
+              <span>Auto-Breakdown</span>
             </Button>
           </div>
 

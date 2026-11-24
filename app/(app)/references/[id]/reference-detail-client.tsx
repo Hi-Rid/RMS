@@ -517,10 +517,10 @@ export function ReferenceDetailClient({
             <div className="space-y-0.5">
               <span className="font-bold text-foreground font-display flex items-center gap-1.5 text-xs">
                 <Sparkles className="size-3.5 text-amber-500 fill-amber-500" />
-                <span>AI Auto-Bedah (Gemini Pro / Flash)</span>
+                <span>AI Auto-Breakdown (Gemini)</span>
               </span>
               <p className="text-[11px] font-mono text-muted-foreground">
-                Ekstrak hook pembuka, visual structure & ide adaptasi orisinal secara otomatis
+                Automatically extract opening hooks, visual structure & original adaptation ideas
               </p>
             </div>
             <Button
@@ -535,7 +535,7 @@ export function ReferenceDetailClient({
               ) : (
                 <Sparkles className="size-3" />
               )}
-              <span>Jalankan Auto-Bedah</span>
+              <span>Run Auto-Breakdown</span>
             </Button>
           </div>
 

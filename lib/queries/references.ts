@@ -10,6 +10,7 @@ import {
   sourceAccounts,
   audios,
   refElements,
+  refImages,
 } from "@/db/schema";
 import type { Platform, ContentFormatGuess } from "@/lib/domain/url";
 
@@ -264,6 +265,7 @@ export interface ReferenceListItem {
   audio: { id: string; title: string; artist: string } | null;
   pillars: { id: string; name: string; slug: string }[];
   elements?: string[];
+  coverUrl?: string | null;
 }
 
 export interface ListReferencesParams {
@@ -409,24 +411,43 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
     return { items: [], total };
   }
 
-  // Batch query pillars for returned references
+  // Batch query pillars and cover images for returned references
   const refIds = rows.map((r) => r.ref.id);
-  const refPillarsList = await db
-    .select({
-      refId: refPillars.refId,
-      pillarId: pillars.id,
-      name: pillars.name,
-      slug: pillars.slug,
-    })
-    .from(refPillars)
-    .innerJoin(pillars, eq(refPillars.pillarId, pillars.id))
-    .where(inArray(refPillars.refId, refIds));
+  const [refPillarsList, refImagesList] = await Promise.all([
+    db
+      .select({
+        refId: refPillars.refId,
+        pillarId: pillars.id,
+        name: pillars.name,
+        slug: pillars.slug,
+      })
+      .from(refPillars)
+      .innerJoin(pillars, eq(refPillars.pillarId, pillars.id))
+      .where(inArray(refPillars.refId, refIds))
+      .catch(() => []),
+    db
+      .select({
+        refId: refImages.refId,
+        storagePath: refImages.storagePath,
+      })
+      .from(refImages)
+      .where(inArray(refImages.refId, refIds))
+      .orderBy(refImages.position)
+      .catch(() => []),
+  ]);
 
   const pillarMap = new Map<string, { id: string; name: string; slug: string }[]>();
   for (const rp of refPillarsList) {
     const list = pillarMap.get(rp.refId) || [];
     list.push({ id: rp.pillarId, name: rp.name, slug: rp.slug });
     pillarMap.set(rp.refId, list);
+  }
+
+  const coverMap = new Map<string, string>();
+  for (const img of refImagesList) {
+    if (!coverMap.has(img.refId)) {
+      coverMap.set(img.refId, img.storagePath);
+    }
   }
 
   const items: ReferenceListItem[] = rows.map((r) => ({
@@ -451,6 +472,7 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
     sourceAccount: r.sourceAccount?.id ? r.sourceAccount : null,
     audio: r.audio?.id ? r.audio : null,
     pillars: pillarMap.get(r.ref.id) || [],
+    coverUrl: coverMap.get(r.ref.id) || null,
   }));
 
     return { items, total };

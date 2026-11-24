@@ -85,8 +85,8 @@ export default async function SettingsPage() {
               </div>
               <p className="text-muted-foreground leading-relaxed">
                 {hasGeminiKey
-                  ? "Gemini 2.5 Flash aktif. Siap digunakan untuk Auto-Bedah Hook, AI Hook Generator (6 angle viral), dan Script Generator."
-                  : "Tambahkan Google Generative AI API Key di file .env.local Anda untuk mengaktifkan fitur Auto-Bedah dan AI Generator 100% Gratis (1.500 request/hari tanpa kartu kredit)."}
+                  ? "Gemini 2.5 Flash is active and ready for Auto-Bedah Hook analysis, Viral Hook Generation (6 conversion angles), and Production Script Writing."
+                  : "Add your Google Generative AI API Key to your .env.local file to enable AI Auto-Bedah and automation (1,500 requests/day 100% free with no credit card required)."}
               </p>
             </div>
           </div>
@@ -98,21 +98,21 @@ export default async function SettingsPage() {
                 <div className="flex items-center gap-2">
                   <Sparkles className="size-4 text-foreground" />
                   <CardTitle className="text-sm font-bold font-display uppercase tracking-wider">
-                    Fitur AI Studio yang Tersedia
+                    Available AI Features
                   </CardTitle>
                 </div>
                 <CardDescription className="text-xs text-muted-foreground">
-                  Fitur otomasi berbasis domain content strategy RMS
+                  Automated content strategy workflows powered by Gemini
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-0 space-y-3 pt-2 text-xs">
                 <div className="p-3 rounded-lg border border-border/80 bg-secondary/30 space-y-1">
                   <div className="font-bold text-foreground flex items-center gap-1.5 font-display">
                     <span className="size-1.5 rounded-full bg-primary" />
-                    Auto-Bedah Referensi
+                    Auto-Bedah Reference Analysis
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Mengekstrak kalimat hook 3 detik pertama, tipe psikologis hook, visual visual notes, takeaway utama, dan 3 ide adaptasi original.
+                    Extracts the opening 3-second hook, psychological hook archetype, visual composition notes, key takeaways, and 3 original adaptation ideas.
                   </p>
                 </div>
 
@@ -122,7 +122,7 @@ export default async function SettingsPage() {
                     Viral Hook Generator (6 Angles)
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Membuat 6 variasi hook conversion tinggi: Problem-First, Curiosity Gap, Kontrarian, Relatable, Data/Hasil, dan Question.
+                    Generates 6 high-conversion hook angles: Problem-First, Curiosity Gap, Contrarian, Relatable, Data/Result, and Provocative Question.
                   </p>
                 </div>
 
@@ -132,7 +132,7 @@ export default async function SettingsPage() {
                     4-Part Production Script Writer
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Menulis naskah short-form siap shooting: Hook (0-3s), Problem (3-15s), Value + B-Roll Action (15-45s), dan CTA Closing.
+                    Drafts complete short-form shooting scripts: Hook (0-3s), Problem (3-15s), Value & B-Roll Action (15-45s), and CTA Closing.
                   </p>
                 </div>
               </CardContent>
@@ -144,17 +144,17 @@ export default async function SettingsPage() {
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="size-4 text-foreground" />
                   <CardTitle className="text-sm font-bold font-display uppercase tracking-wider">
-                    Cara Mendapatkan Key (100% Gratis)
+                    How to Get Your API Key (Free)
                   </CardTitle>
                 </div>
                 <CardDescription className="text-xs text-muted-foreground">
-                  Google AI Studio Free Tier (1.500 requests per hari)
+                  Google AI Studio Free Tier (1,500 requests per day)
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-0 space-y-3.5 pt-2 text-xs">
                 <ol className="space-y-2 list-decimal list-inside text-muted-foreground font-sans leading-relaxed">
                   <li>
-                    Buka situs{" "}
+                    Visit{" "}
                     <a
                       href="https://aistudio.google.com/apikey"
                       target="_blank"
@@ -165,13 +165,13 @@ export default async function SettingsPage() {
                       <ExternalLink className="size-3" />
                     </a>
                   </li>
-                  <li>Login menggunakan akun Google pribadi Anda.</li>
+                  <li>Sign in with your personal Google account.</li>
                   <li>
-                    Klik tombol <strong>Create API Key</strong> &rarr; pilih project atau buat project baru.
+                    Click <strong>Create API Key</strong> &rarr; select or create a project.
                   </li>
-                  <li>Copy API key yang muncul (berawalan <code>AIzaSy...</code>).</li>
+                  <li>Copy the generated API key (starts with <code>AIzaSy...</code>).</li>
                   <li>
-                    Buka file <code>.env.local</code> di folder project RMS, lalu paste:
+                    Open your <code>.env.local</code> file in the RMS project root, and paste:
                   </li>
                 </ol>
 
@@ -180,7 +180,7 @@ GOOGLE_GENERATIVE_AI_API_KEY=AIzaSy...
                 </pre>
 
                 <p className="text-[11px] text-muted-foreground font-mono">
-                  * Restart dev server (<code>pnpm run dev</code>) setelah menambahkan API key agar Next.js memuat environment variable baru.
+                  * Restart the dev server (<code>pnpm run dev</code>) after adding your API key so Next.js loads the new environment variable.
                 </p>
               </CardContent>
             </Card>
