@@ -35,7 +35,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({
   counts,
-  ownerEmail = "owner@folio.local",
+  ownerEmail = "owner@rms.local",
   onOpenCommand,
   onOpenAddLinks,
 }: AppSidebarProps) {
@@ -53,10 +53,10 @@ export function AppSidebar({
         <div className="flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 group">
             <div className="size-7 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-mono text-xs font-bold tracking-tight">
-              F
+              R
             </div>
             <span className="font-display font-black text-xl tracking-tight text-foreground">
-              Folio
+              RMS
             </span>
           </Link>
           <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">

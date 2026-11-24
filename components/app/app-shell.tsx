@@ -64,7 +64,7 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
             </Sheet>
 
             <Link href="/" className="font-display font-black text-lg tracking-tight">
-              Folio
+              RMS
             </Link>
           </div>
 

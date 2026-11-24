@@ -11,7 +11,7 @@ export async function getOwner(): Promise<{ email: string } | null> {
   // In development without configured OWNER_EMAIL, provide a fallback session
   if (!ownerEmail) {
     if (process.env.NODE_ENV === "development") {
-      return { email: "owner@folio.local" };
+      return { email: "owner@rms.local" };
     }
     return null;
   }

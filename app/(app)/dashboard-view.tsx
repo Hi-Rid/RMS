@@ -79,7 +79,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
         {/* 1. Centered Hero Header */}
         <div className="flex flex-col items-center text-center space-y-3">
           <div className="size-11 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-display font-black text-xl shadow-none">
-            F
+            R
           </div>
           <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-foreground font-display">
             Hi, {displayName}
@@ -219,7 +219,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
                         Connect a channel
                       </h3>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Pick the account Folio collects from or capture your first reference link.
+                        Pick the account RMS collects from or capture your first reference link.
                       </p>
                     </div>
                     {!hasRefs && (
@@ -308,13 +308,13 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
 
         {/* 4. Bottom Two-Column Section (Matching Eksis layout) */}
         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Left Column: Ask Folio AI */}
+          {/* Left Column: Ask RMS AI */}
           <Card className="rounded-xl border bg-card p-5 shadow-none flex flex-col justify-between">
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <Sparkles className="size-4 text-foreground" />
                 <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground">
-                  Ask Folio AI
+                  Ask RMS AI
                 </h3>
               </div>
 

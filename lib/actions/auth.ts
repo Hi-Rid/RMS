@@ -58,7 +58,7 @@ export async function verifyLoginCode(input: {
 
   // Development convenience bypass if Supabase is unconfigured locally
   if (!ownerEmail && process.env.NODE_ENV === "development" && parsed.data.code === "123456") {
-    return ok({ email: "owner@folio.local" });
+    return ok({ email: "owner@rms.local" });
   }
 
   try {

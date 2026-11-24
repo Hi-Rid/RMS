@@ -83,13 +83,13 @@ function LoginForm() {
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center space-y-1">
           <div className="inline-flex size-10 items-center justify-center rounded-control bg-primary text-primary-foreground font-mono text-sm font-bold tracking-widest mb-2">
-            F
+            R
           </div>
           <h1 className="text-3xl font-black tracking-tight text-foreground font-display">
-            Folio
+            RMS
           </h1>
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            Personal Content System
+            Reference Management & Content Studio
           </p>
         </div>
 
