@@ -215,7 +215,7 @@ export function ReferenceDetailClient({
   };
 
   return (
-    <div className="w-full max-w-5xl py-8 px-4 sm:px-8 space-y-6">
+    <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
       {/* Top Bar Navigation */}
       <div className="flex items-center justify-between border-b border-border/80 pb-4">
         <Link

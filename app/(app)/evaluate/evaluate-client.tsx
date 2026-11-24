@@ -37,7 +37,7 @@ export function EvaluateClient({
   const router = useRouter();
 
   return (
-    <div className="w-full max-w-5xl py-8 px-4 sm:px-8 space-y-6">
+    <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
       {/* Header */}
       <div className="border-b border-border/80 pb-6 space-y-1">
         <div className="flex items-center gap-3">

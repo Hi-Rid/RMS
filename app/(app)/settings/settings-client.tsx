@@ -241,7 +241,7 @@ export function SettingsClient({
   });
 
   return (
-    <div className="w-full max-w-5xl py-8 px-4 sm:px-8 space-y-6">
+    <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
       {/* Page Header */}
       <div className="space-y-1">
         <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-foreground font-display flex items-center gap-2.5">

@@ -37,7 +37,7 @@ export default async function ReferencesPage({ searchParams }: ReferencesPagePro
   const { items, total } = refsData;
 
   return (
-    <div className="w-full max-w-6xl py-8 px-4 sm:px-8 space-y-6">
+    <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/80 pb-6">
         <div className="space-y-1">

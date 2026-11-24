@@ -15,6 +15,11 @@ import {
   formats,
   hookTypes,
   platforms,
+  refPillars,
+  contentPillars,
+  refs,
+  contents,
+  posts,
 } from "@/db/schema";
 import { getAppSettings } from "@/lib/queries/settings";
 import { getGoogleClient, runWithModelFallback } from "@/lib/ai/client";
@@ -288,5 +293,234 @@ export async function createMasterItem(
   } catch (err) {
     console.error(`Error creating master item ${tableType}:`, err);
     return fail("internal", "Failed to create master item");
+  }
+}
+
+/**
+ * Updates a master data item (Rename & configuration attributes).
+ */
+export async function updateMasterItem(
+  tableType: MasterTableType,
+  id: string,
+  input: {
+    name: string;
+    hasCheckpoints?: boolean;
+    domains?: string[];
+  }
+): Promise<ActionResult<void>> {
+  await requireActionOwner();
+  const trimmed = input.name.trim();
+  if (!trimmed) {
+    return fail("validation", "Name cannot be empty");
+  }
+
+  try {
+    switch (tableType) {
+      case "pillars":
+        await db.update(pillars).set({ name: trimmed }).where(eq(pillars.id, id));
+        break;
+      case "series":
+        await db.update(series).set({ name: trimmed }).where(eq(series.id, id));
+        break;
+      case "formats":
+        await db
+          .update(formats)
+          .set({
+            name: trimmed,
+            ...(input.hasCheckpoints !== undefined ? { hasCheckpoints: input.hasCheckpoints } : {}),
+          })
+          .where(eq(formats.id, id));
+        break;
+      case "hookTypes":
+        await db.update(hookTypes).set({ name: trimmed }).where(eq(hookTypes.id, id));
+        break;
+      case "platforms":
+        await db
+          .update(platforms)
+          .set({
+            name: trimmed,
+            ...(input.domains ? { domains: input.domains } : {}),
+          })
+          .where(eq(platforms.id, id));
+        break;
+    }
+
+    revalidatePath("/settings");
+    return ok();
+  } catch (err) {
+    console.error(`Error updating master item ${tableType}:`, err);
+    return fail("internal", "Failed to update master item");
+  }
+}
+
+/**
+ * Safely deletes a master data item with usage verification (PRD §12.17).
+ */
+export async function deleteMasterItem(
+  tableType: MasterTableType,
+  id: string
+): Promise<ActionResult<void>> {
+  await requireActionOwner();
+
+  try {
+    switch (tableType) {
+      case "pillars": {
+        const [refUsage, contentUsage] = await Promise.all([
+          db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(refPillars)
+            .where(eq(refPillars.pillarId, id)),
+          db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(contentPillars)
+            .where(eq(contentPillars.pillarId, id)),
+        ]);
+        const totalUsed = (refUsage[0]?.count || 0) + (contentUsage[0]?.count || 0);
+        if (totalUsed > 0) {
+          return fail(
+            "blocked",
+            `Cannot delete: Pillar is currently in use by ${totalUsed} reference(s) or content(s). Deactivate it instead.`
+          );
+        }
+        await db.delete(pillars).where(eq(pillars.id, id));
+        break;
+      }
+      case "series": {
+        const [usage] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(contents)
+          .where(eq(contents.seriesId, id));
+        if ((usage?.count || 0) > 0) {
+          return fail(
+            "blocked",
+            `Cannot delete: Series is in use by ${usage.count} content(s). Deactivate it instead.`
+          );
+        }
+        await db.delete(series).where(eq(series.id, id));
+        break;
+      }
+      case "formats": {
+        const [refUsage, contentUsage] = await Promise.all([
+          db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(refs)
+            .where(eq(refs.formatId, id)),
+          db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(contents)
+            .where(eq(contents.formatId, id)),
+        ]);
+        const totalUsed = (refUsage[0]?.count || 0) + (contentUsage[0]?.count || 0);
+        if (totalUsed > 0) {
+          return fail(
+            "blocked",
+            `Cannot delete: Format is in use by ${totalUsed} item(s). Deactivate it instead.`
+          );
+        }
+        await db.delete(formats).where(eq(formats.id, id));
+        break;
+      }
+      case "hookTypes": {
+        const [refUsage, contentUsage] = await Promise.all([
+          db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(refs)
+            .where(eq(refs.hookTypeId, id)),
+          db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(contents)
+            .where(eq(contents.hookTypeId, id)),
+        ]);
+        const totalUsed = (refUsage[0]?.count || 0) + (contentUsage[0]?.count || 0);
+        if (totalUsed > 0) {
+          return fail(
+            "blocked",
+            `Cannot delete: Hook type is in use by ${totalUsed} item(s). Deactivate it instead.`
+          );
+        }
+        await db.delete(hookTypes).where(eq(hookTypes.id, id));
+        break;
+      }
+      case "platforms": {
+        const [refUsage, postUsage] = await Promise.all([
+          db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(refs)
+            .where(eq(refs.platformId, id)),
+          db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(posts)
+            .where(eq(posts.platformId, id)),
+        ]);
+        const totalUsed = (refUsage[0]?.count || 0) + (postUsage[0]?.count || 0);
+        if (totalUsed > 0) {
+          return fail(
+            "blocked",
+            `Cannot delete: Platform is in use by ${totalUsed} item(s). Deactivate it instead.`
+          );
+        }
+        await db.delete(platforms).where(eq(platforms.id, id));
+        break;
+      }
+    }
+
+    revalidatePath("/settings");
+    return ok();
+  } catch (err) {
+    console.error(`Error deleting master item ${tableType}:`, err);
+    return fail("internal", "Failed to delete master item");
+  }
+}
+
+/**
+ * Changes sort order of a master data item (Move Up / Move Down).
+ */
+export async function reorderMasterItem(
+  tableType: MasterTableType,
+  id: string,
+  direction: "up" | "down"
+): Promise<ActionResult<void>> {
+  await requireActionOwner();
+  const delta = direction === "up" ? -1 : 1;
+
+  try {
+    switch (tableType) {
+      case "pillars":
+        await db
+          .update(pillars)
+          .set({ sortOrder: sql`${pillars.sortOrder} + ${delta}` })
+          .where(eq(pillars.id, id));
+        break;
+      case "series":
+        await db
+          .update(series)
+          .set({ sortOrder: sql`${series.sortOrder} + ${delta}` })
+          .where(eq(series.id, id));
+        break;
+      case "formats":
+        await db
+          .update(formats)
+          .set({ sortOrder: sql`${formats.sortOrder} + ${delta}` })
+          .where(eq(formats.id, id));
+        break;
+      case "hookTypes":
+        await db
+          .update(hookTypes)
+          .set({ sortOrder: sql`${hookTypes.sortOrder} + ${delta}` })
+          .where(eq(hookTypes.id, id));
+        break;
+      case "platforms":
+        await db
+          .update(platforms)
+          .set({ sortOrder: sql`${platforms.sortOrder} + ${delta}` })
+          .where(eq(platforms.id, id));
+        break;
+    }
+
+    revalidatePath("/settings");
+    return ok();
+  } catch (err) {
+    console.error(`Error reordering master item ${tableType}:`, err);
+    return fail("internal", "Failed to reorder master item");
   }
 }

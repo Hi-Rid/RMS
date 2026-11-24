@@ -94,7 +94,7 @@ export function AudioDetailClient({ data }: AudioDetailClientProps) {
   };
 
   return (
-    <div className="w-full max-w-5xl py-8 px-4 sm:px-8 space-y-6">
+    <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
       {/* Back & Breadcrumb */}
       <div className="flex items-center justify-between">
         <Link

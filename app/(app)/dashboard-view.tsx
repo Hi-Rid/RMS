@@ -79,7 +79,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
   );
 
   return (
-    <div className="relative min-h-full w-full py-8 px-4 sm:px-8 space-y-8 max-w-6xl mx-auto">
+    <div className="relative min-h-full w-full py-8 px-4 sm:px-8 lg:px-10 space-y-8 max-w-7xl mx-auto">
       {/* Background blueprint grid */}
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.25]"

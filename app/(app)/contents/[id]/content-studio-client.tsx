@@ -266,7 +266,7 @@ export function ContentStudioClient({
   const progressPct = checklist.length > 0 ? Math.round((doneCount / checklist.length) * 100) : 0;
 
   return (
-    <div className="w-full max-w-6xl py-8 px-4 sm:px-8 space-y-6">
+    <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
       {/* Top Header */}
       <div className="flex items-center justify-between border-b border-border/80 pb-4">
         <Link

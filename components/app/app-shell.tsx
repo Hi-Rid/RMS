@@ -88,7 +88,7 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
         </header>
 
         {/* Scrollable Content Viewport */}
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto w-full">
           {children}
         </main>
       </div>
