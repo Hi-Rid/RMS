@@ -52,22 +52,22 @@ export function AppSidebar({
       <div className="p-4 pb-2 space-y-3">
         <div className="flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 group">
-            <div className="size-7 rounded-control bg-primary text-primary-foreground flex items-center justify-center font-mono text-xs font-bold tracking-tight">
+            <div className="size-7 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-mono text-xs font-bold tracking-tight">
               F
             </div>
             <span className="font-display font-black text-xl tracking-tight text-foreground">
               Folio
             </span>
           </Link>
-          <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
+          <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">
             v2.0
           </span>
         </div>
 
-        {/* Prominent "+ Create / Add link" Action Button (inspired by user screenshot) */}
+        {/* Prominent "+ Create / Add link" Action Button */}
         <Button
           onClick={onOpenAddLinks}
-          className="w-full h-[36px] rounded-control bg-primary text-primary-foreground hover:bg-primary/90 font-medium text-xs font-mono uppercase tracking-wider flex items-center justify-center gap-1.5"
+          className="w-full h-[36px] rounded-md bg-primary text-primary-foreground hover:bg-primary/90 font-medium text-xs font-mono uppercase tracking-wider flex items-center justify-center gap-1.5"
         >
           <Plus className="size-4" />
           <span>Add Reference</span>
@@ -76,7 +76,7 @@ export function AppSidebar({
         {/* Quick Search Bar / Command Palette Trigger */}
         <button
           onClick={onOpenCommand}
-          className="w-full h-[32px] rounded-control bg-background border border-border px-2.5 flex items-center justify-between text-xs text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors"
+          className="w-full h-[32px] rounded-md bg-background border border-border px-2.5 flex items-center justify-between text-xs text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors"
         >
           <span className="flex items-center gap-1.5">
             <Search className="size-3.5" />
@@ -200,7 +200,7 @@ export function AppSidebar({
                 <Link
                   key={pillar.id}
                   href={`/references?pillar=${pillar.slug}`}
-                  className="flex items-center justify-between px-2.5 py-1.5 rounded-control text-xs text-foreground/80 hover:bg-secondary hover:text-foreground transition-colors"
+                  className="flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs text-foreground/80 hover:bg-secondary hover:text-foreground transition-colors"
                 >
                   <span className="truncate">{pillar.name}</span>
                   <span className="text-[11px] font-mono text-muted-foreground">{pillar.count}</span>
@@ -227,7 +227,7 @@ export function AppSidebar({
               <Link
                 key={statusKey}
                 href={`/references?status=${statusKey}`}
-                className="flex items-center justify-between px-2.5 py-1 rounded-control text-xs text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                className="flex items-center justify-between px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
               >
                 <span>{label}</span>
                 <span className="text-[11px] font-mono">
@@ -243,7 +243,7 @@ export function AppSidebar({
       <div className="p-3 border-t border-border bg-sidebar">
         <div className="flex items-center justify-between p-2 rounded-lg bg-background border border-border/80">
           <div className="flex items-center gap-2 overflow-hidden">
-            <div className="size-7 shrink-0 rounded-full bg-secondary flex items-center justify-center font-mono text-xs font-bold text-foreground">
+            <div className="size-7 shrink-0 rounded-md bg-secondary flex items-center justify-center font-mono text-xs font-bold text-foreground">
               {ownerEmail.slice(0, 2).toUpperCase()}
             </div>
             <div className="overflow-hidden">
@@ -285,7 +285,7 @@ function NavItem({
     <Link
       href={href}
       className={cn(
-        "flex items-center justify-between px-2.5 py-1.5 rounded-control text-xs font-medium transition-colors",
+        "flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors",
         isActive
           ? "bg-primary text-primary-foreground font-semibold"
           : "text-foreground/80 hover:bg-secondary hover:text-foreground"
@@ -298,7 +298,7 @@ function NavItem({
       {typeof count === "number" && count > 0 && (
         <span
           className={cn(
-            "text-[10px] font-mono px-1.5 py-0.2 rounded-full",
+            "text-[10px] font-mono px-1.5 py-0.5 rounded",
             isActive
               ? "bg-primary-foreground/20 text-primary-foreground"
               : highlightCount

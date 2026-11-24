@@ -41,7 +41,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
   const hasPosts = data.weeklyTarget.posted > 0;
   const completedSteps = (hasRefs ? 1 : 0) + (hasContents ? 1 : 0) + (hasPosts ? 1 : 0);
 
-  // User display name from email (e.g. "elise" from "elise@domain.com")
+  // User display name from email (e.g. "Elise" from "elise@domain.com")
   const displayName = React.useMemo(() => {
     if (!ownerEmail) return "Creator";
     const localPart = ownerEmail.split("@")[0];
@@ -60,9 +60,9 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
       />
 
       <div className="relative w-full max-w-2xl flex flex-col items-center space-y-8">
-        {/* 1. Centered Hero Greeting Header (matching uploaded screenshot) */}
+        {/* 1. Centered Hero Greeting Header */}
         <div className="flex flex-col items-center text-center space-y-3">
-          <div className="size-12 rounded-control bg-primary text-primary-foreground flex items-center justify-center font-display font-black text-xl shadow-none">
+          <div className="size-11 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-display font-black text-xl shadow-none">
             F
           </div>
           <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-foreground font-display">
@@ -73,12 +73,12 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
           </p>
         </div>
 
-        {/* 2. Centered Search / Command Bar (matching uploaded screenshot) */}
+        {/* 2. Centered Search / Command Bar */}
         <div className="w-full space-y-3">
           <button
             type="button"
             onClick={() => setCommandOpen(true)}
-            className="w-full h-[46px] rounded-control bg-background border border-border px-4 flex items-center justify-between text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-all shadow-none group"
+            className="w-full h-[46px] rounded-lg bg-background border border-border px-4 flex items-center justify-between text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-all shadow-none group"
           >
             <div className="flex items-center gap-3">
               <Search className="size-4 text-muted-foreground group-hover:text-foreground transition-colors" />
@@ -141,7 +141,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
           </div>
         </div>
 
-        {/* 3. Main Focus Card: "Get your first post out" (matching uploaded screenshot) */}
+        {/* 3. Main Focus Card: "Get your first post out" */}
         <Card className="w-full rounded-lg border bg-card p-6 shadow-none">
           <div className="space-y-6">
             <div className="flex items-start justify-between border-b border-border/70 pb-4">
@@ -158,7 +158,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
                   {completedSteps} of 3 done
                 </p>
               </div>
-              <div className="size-7 rounded-full bg-secondary flex items-center justify-center font-mono text-xs font-bold text-foreground">
+              <div className="size-7 rounded-md bg-secondary flex items-center justify-center font-mono text-xs font-bold text-foreground">
                 {completedSteps}/3
               </div>
             </div>
@@ -167,13 +167,13 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
               {/* Step 1: Save reference */}
               <div className="flex items-start gap-4">
                 <div
-                  className={`size-7 shrink-0 rounded-full flex items-center justify-center font-mono text-xs font-bold ${
+                  className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
                     hasRefs
                       ? "bg-primary text-primary-foreground"
                       : "bg-secondary text-secondary-foreground border border-border"
                   }`}
                 >
-                  {hasRefs ? <CheckCircle2 className="size-4" /> : "1"}
+                  {hasRefs ? <CheckCircle2 className="size-3.5" /> : "1"}
                 </div>
                 <div className="flex-1 space-y-2">
                   <div>
@@ -188,7 +188,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
                     <Button
                       size="sm"
                       onClick={() => setAddLinksOpen(true)}
-                      className="h-8 rounded-control bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
+                      className="h-8 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
                     >
                       <Plus className="size-3.5 mr-1" />
                       <span>Add reference</span>
@@ -200,13 +200,13 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
               {/* Step 2: Adapt into original content */}
               <div className="flex items-start gap-4">
                 <div
-                  className={`size-7 shrink-0 rounded-full flex items-center justify-center font-mono text-xs font-bold ${
+                  className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
                     hasContents
                       ? "bg-primary text-primary-foreground"
                       : "bg-secondary text-secondary-foreground border border-border"
                   }`}
                 >
-                  {hasContents ? <CheckCircle2 className="size-4" /> : "2"}
+                  {hasContents ? <CheckCircle2 className="size-3.5" /> : "2"}
                 </div>
                 <div className="flex-1 space-y-2">
                   <div>
@@ -221,7 +221,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
                     <Link href="/contents/new">
                       <Button
                         size="sm"
-                        className="h-8 rounded-control bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
+                        className="h-8 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
                       >
                         <Plus className="size-3.5 mr-1" />
                         <span>Create content</span>
@@ -234,13 +234,13 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
               {/* Step 3: Schedule or publish */}
               <div className="flex items-start gap-4">
                 <div
-                  className={`size-7 shrink-0 rounded-full flex items-center justify-center font-mono text-xs font-bold ${
+                  className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
                     hasPosts
                       ? "bg-primary text-primary-foreground"
                       : "bg-secondary text-secondary-foreground border border-border"
                   }`}
                 >
-                  {hasPosts ? <CheckCircle2 className="size-4" /> : "3"}
+                  {hasPosts ? <CheckCircle2 className="size-3.5" /> : "3"}
                 </div>
                 <div className="flex-1 space-y-2">
                   <div>
@@ -255,7 +255,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
                     <Link href="/contents">
                       <Button
                         size="sm"
-                        className="h-8 rounded-control bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
+                        className="h-8 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
                       >
                         <span>Open contents</span>
                       </Button>
@@ -267,7 +267,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
           </div>
         </Card>
 
-        {/* 4. Bottom Two-Column Grid (matching uploaded screenshot) */}
+        {/* 4. Bottom Two-Column Grid */}
         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Left Column: Recent References */}
           <Card className="rounded-lg border bg-card p-4 shadow-none flex flex-col justify-between">
@@ -300,7 +300,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
                         <span className="font-medium text-foreground truncate max-w-[200px]">
                           {ref.summary || "Untitled Reference"}
                         </span>
-                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 rounded bg-background text-muted-foreground">
+                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-background text-muted-foreground">
                           {ref.status}
                         </span>
                       </div>
@@ -321,7 +321,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
                 variant="outline"
                 size="sm"
                 onClick={() => setAddLinksOpen(true)}
-                className="w-full h-8 rounded-control text-xs font-mono uppercase tracking-wider"
+                className="w-full h-8 rounded-md text-xs font-mono uppercase tracking-wider"
               >
                 <Plus className="size-3 mr-1" />
                 <span>Add reference</span>
@@ -376,7 +376,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full h-8 rounded-control text-xs font-mono uppercase tracking-wider"
+                  className="w-full h-8 rounded-md text-xs font-mono uppercase tracking-wider"
                 >
                   <Plus className="size-3 mr-1" />
                   <span>Create content</span>
@@ -419,7 +419,7 @@ function PillButton({
   return (
     <Link
       href={href}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-control text-xs font-medium border border-border bg-background hover:bg-secondary text-foreground/80 hover:text-foreground transition-all shadow-none ${
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-border bg-background hover:bg-secondary text-foreground/80 hover:text-foreground transition-all shadow-none ${
         highlight ? "border-destructive/40 text-destructive" : ""
       }`}
     >
@@ -427,7 +427,7 @@ function PillButton({
       <span>{label}</span>
       {typeof count === "number" && count > 0 && (
         <span
-          className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+          className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
             highlight
               ? "bg-destructive text-destructive-foreground font-bold"
               : "bg-secondary text-secondary-foreground"

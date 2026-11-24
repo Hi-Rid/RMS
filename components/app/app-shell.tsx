@@ -42,7 +42,7 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
               <SheetTrigger asChild>
                 <button
                   aria-label="Open navigation menu"
-                  className="size-9 rounded-control flex items-center justify-center hover:bg-secondary text-foreground"
+                  className="size-9 rounded-md flex items-center justify-center hover:bg-secondary text-foreground"
                 >
                   <Menu className="size-5" />
                 </button>
@@ -72,14 +72,14 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
             <button
               onClick={() => setCommandOpen(true)}
               aria-label="Quick search"
-              className="size-8 rounded-control flex items-center justify-center hover:bg-secondary text-muted-foreground hover:text-foreground"
+              className="size-8 rounded-md flex items-center justify-center hover:bg-secondary text-muted-foreground hover:text-foreground"
             >
               <Search className="size-4" />
             </button>
             <Button
               size="sm"
               onClick={() => setAddLinksOpen(true)}
-              className="h-8 rounded-control bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider px-3"
+              className="h-8 rounded-md bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider px-3"
             >
               <Plus className="size-3.5 mr-1" />
               <span>Add</span>

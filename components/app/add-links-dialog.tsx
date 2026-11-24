@@ -51,11 +51,11 @@ export function AddLinksDialog({ open, onOpenChange }: AddLinksDialogProps) {
         </DialogHeader>
 
         <Tabs defaultValue="paste" className="w-full mt-2">
-          <TabsList className="grid w-full grid-cols-2 bg-secondary rounded-control p-1">
-            <TabsTrigger value="paste" className="rounded-control text-xs font-mono uppercase tracking-wider">
+          <TabsList className="grid w-full grid-cols-2 bg-secondary rounded-md p-1">
+            <TabsTrigger value="paste" className="rounded-md text-xs font-mono uppercase tracking-wider">
               Paste Links
             </TabsTrigger>
-            <TabsTrigger value="file" className="rounded-control text-xs font-mono uppercase tracking-wider">
+            <TabsTrigger value="file" className="rounded-md text-xs font-mono uppercase tracking-wider">
               From File
             </TabsTrigger>
           </TabsList>

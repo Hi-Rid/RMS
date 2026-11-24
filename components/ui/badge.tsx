@@ -4,7 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center justify-center rounded-full border px-2 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring focus-visible:ring-1 aria-invalid:border-destructive aria-invalid:ring-destructive overflow-hidden",
+  "inline-flex items-center justify-center rounded-md border px-2 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring focus-visible:ring-1 aria-invalid:border-destructive aria-invalid:ring-destructive overflow-hidden",
   {
     variants: {
       variant: {
@@ -16,7 +16,7 @@ const badgeVariants = cva(
           "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive",
         outline:
           "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-        chip: "border-transparent bg-secondary text-secondary-foreground rounded-full px-2.5 py-0.5 text-xs font-normal [a&]:hover:bg-tertiary",
+        chip: "border-transparent bg-secondary text-secondary-foreground rounded-md px-2.5 py-0.5 text-xs font-normal [a&]:hover:bg-tertiary",
         mono: "border-none bg-transparent text-muted-foreground rounded-none px-0 py-0 label-mono",
       },
     },
