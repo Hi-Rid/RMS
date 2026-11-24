@@ -1,15 +1,26 @@
-import { FilePlus } from "lucide-react";
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { getMasterData, getReferenceById } from "@/lib/queries/references";
+import { NewContentClient } from "./new-content-client";
 
-export default function NewContentPage() {
+export const instant = false;
+
+interface NewContentPageProps {
+  searchParams: Promise<{
+    refId?: string;
+  }>;
+}
+
+export default async function NewContentPage({ searchParams }: NewContentPageProps) {
+  const { refId } = await searchParams;
+
+  const [masterData, sourceReference] = await Promise.all([
+    getMasterData(),
+    refId ? getReferenceById(refId) : Promise.resolve(null),
+  ]);
+
   return (
-    <PlaceholderPage
-      title="Create Content"
-      description="Craft original content or adapt from 1 or more references. Assign hooks, audio, pillars, and checklist."
-      phase="Prompt P8"
-      icon={<FilePlus className="size-6" />}
-      backHref="/contents"
-      backLabel="Back to Contents"
+    <NewContentClient
+      masterData={masterData}
+      sourceReference={sourceReference}
     />
   );
 }

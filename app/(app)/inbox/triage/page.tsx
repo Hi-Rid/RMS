@@ -1,15 +1,13 @@
-import { ListTodo } from "lucide-react";
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { getInboxReferences, getMasterData } from "@/lib/queries/references";
+import { TriageFlow } from "./triage-flow";
 
-export default function TriagePage() {
-  return (
-    <PlaceholderPage
-      title="Triage Mode"
-      description="Process inbox references one by one with rapid keyboard shortcuts: Select, Skip, or Later."
-      phase="Prompt P6"
-      icon={<ListTodo className="size-6" />}
-      backHref="/inbox"
-      backLabel="Back to Inbox"
-    />
-  );
+export const instant = false;
+
+export default async function TriagePage() {
+  const [items, masterData] = await Promise.all([
+    getInboxReferences(),
+    getMasterData(),
+  ]);
+
+  return <TriageFlow initialItems={items} masterData={masterData} />;
 }

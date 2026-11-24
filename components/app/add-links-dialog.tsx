@@ -8,6 +8,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -21,11 +22,17 @@ import {
 } from "@/lib/actions/references";
 
 interface AddLinksDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  children?: React.ReactNode;
 }
 
-export function AddLinksDialog({ open, onOpenChange }: AddLinksDialogProps) {
+export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogProps) {
+  const [internalOpen, setInternalOpen] = React.useState(false);
+  const isControlled = open !== undefined;
+  const isOpen = isControlled ? open : internalOpen;
+  const setIsOpen = isControlled ? onOpenChange! : setInternalOpen;
+
   const [linksText, setLinksText] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
@@ -61,7 +68,7 @@ export function AddLinksDialog({ open, onOpenChange }: AddLinksDialogProps) {
           toast.info(`All ${totalProcessed} links are already in your references`);
         }
         setLinksText("");
-        onOpenChange(false);
+        setIsOpen(false);
       } else {
         toast.error(res.error.message || "Failed to process references");
       }
@@ -123,7 +130,7 @@ export function AddLinksDialog({ open, onOpenChange }: AddLinksDialogProps) {
       if (res.ok) {
         toast.success(`Successfully imported ${res.data.created} references`);
         setPreviewData(null);
-        onOpenChange(false);
+        setIsOpen(false);
       } else {
         toast.error(res.error.message || "Import failed");
       }
@@ -135,7 +142,8 @@ export function AddLinksDialog({ open, onOpenChange }: AddLinksDialogProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent className="sm:max-w-md rounded-lg border bg-card p-6 shadow-none">
         <DialogHeader>
           <DialogTitle className="text-xl font-bold font-display">Add References</DialogTitle>
@@ -174,7 +182,7 @@ export function AddLinksDialog({ open, onOpenChange }: AddLinksDialogProps) {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => onOpenChange(false)}
+                  onClick={() => setIsOpen(false)}
                   className="h-[34px] rounded-control text-xs font-mono uppercase tracking-wider"
                 >
                   Cancel
@@ -253,7 +261,7 @@ export function AddLinksDialog({ open, onOpenChange }: AddLinksDialogProps) {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => onOpenChange(false)}
+                      onClick={() => setIsOpen(false)}
                       className="text-xs font-mono uppercase tracking-wider"
                     >
                       Cancel

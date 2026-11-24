@@ -1,6 +1,16 @@
-import { eq, and, sql, or } from "drizzle-orm";
+import { eq, and, sql, or, isNull, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { refs, platforms, formats } from "@/db/schema";
+import {
+  refs,
+  platforms,
+  formats,
+  pillars,
+  refPillars,
+  hookTypes,
+  sourceAccounts,
+  audios,
+  refElements,
+} from "@/db/schema";
 import type { Platform, ContentFormatGuess } from "@/lib/domain/url";
 
 // Memory cache for platform and format lookups
@@ -15,7 +25,6 @@ export async function getPlatformIdBySlug(slug: Platform): Promise<string> {
   const id = cachedPlatforms.get(slug);
   if (id) return id;
 
-  // Fallback query if not in cache
   const [row] = await db
     .select({ id: platforms.id })
     .from(platforms)
@@ -27,7 +36,6 @@ export async function getPlatformIdBySlug(slug: Platform): Promise<string> {
     return row.id;
   }
 
-  // Fallback to "other" platform
   const otherId = cachedPlatforms.get("other");
   if (otherId) return otherId;
 
@@ -111,7 +119,6 @@ export async function createReferenceRecord(data: {
   externalId?: string;
   formatId?: string;
 }): Promise<{ id: string; isDuplicate: boolean; archived?: boolean }> {
-  // 1. Initial duplicate check
   const existing = await findExistingReference({
     platformId: data.platformId,
     externalId: data.externalId,
@@ -126,7 +133,6 @@ export async function createReferenceRecord(data: {
     };
   }
 
-  // 2. Insert new record
   try {
     const [created] = await db
       .insert(refs)
@@ -147,7 +153,6 @@ export async function createReferenceRecord(data: {
       isDuplicate: false,
     };
   } catch (err: unknown) {
-    // Check if Postgres unique constraint violation (code 23505) occurred due to race condition
     const pgErr = err as { code?: string };
     if (pgErr.code === "23505") {
       const duplicate = await findExistingReference({
@@ -165,4 +170,339 @@ export async function createReferenceRecord(data: {
     }
     throw err;
   }
+}
+
+export interface MasterData {
+  platforms: { id: string; name: string; slug: string }[];
+  formats: { id: string; name: string; slug: string }[];
+  pillars: { id: string; name: string; slug: string }[];
+  hookTypes: { id: string; name: string; slug: string }[];
+}
+
+/**
+ * Returns active master data for dropdowns, filters, and forms.
+ */
+export async function getMasterData(): Promise<MasterData> {
+  const [platformList, formatList, pillarList, hookTypeList] = await Promise.all([
+    db.select({ id: platforms.id, name: platforms.name, slug: platforms.slug }).from(platforms).orderBy(platforms.name),
+    db.select({ id: formats.id, name: formats.name, slug: formats.slug }).from(formats).orderBy(formats.sortOrder),
+    db.select({ id: pillars.id, name: pillars.name, slug: pillars.slug }).from(pillars).where(eq(pillars.isActive, true)).orderBy(pillars.sortOrder),
+    db.select({ id: hookTypes.id, name: hookTypes.name, slug: hookTypes.slug }).from(hookTypes).orderBy(hookTypes.sortOrder),
+  ]);
+
+  return {
+    platforms: platformList,
+    formats: formatList,
+    pillars: pillarList,
+    hookTypes: hookTypeList,
+  };
+}
+
+export interface ReferenceListItem {
+  id: string;
+  url: string;
+  urlOriginal: string;
+  status: string;
+  summary: string | null;
+  hookText: string | null;
+  visualNotes: string | null;
+  notes: string | null;
+  tags: string[];
+  skippedReason: string | null;
+  contentId: string | null;
+  contentPosition: number | null;
+  savedAt: string;
+  statusChangedAt: string;
+  archivedAt: string | null;
+  platform: { id: string; name: string; slug: string };
+  format: { id: string; name: string; slug: string } | null;
+  hookType: { id: string; name: string; slug: string } | null;
+  sourceAccount: { id: string; handle: string } | null;
+  audio: { id: string; title: string; artist: string } | null;
+  pillars: { id: string; name: string; slug: string }[];
+  elements?: string[];
+}
+
+export interface ListReferencesParams {
+  status?: string;
+  pillarSlug?: string;
+  platformSlug?: string;
+  formatSlug?: string;
+  unusedOnly?: boolean;
+  searchText?: string;
+  archived?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Retrieves a list of references with filtering, search, and associated relations.
+ */
+export async function listReferences(params: ListReferencesParams = {}): Promise<{
+  items: ReferenceListItem[];
+  total: number;
+}> {
+  const {
+    status,
+    pillarSlug,
+    platformSlug,
+    formatSlug,
+    unusedOnly,
+    searchText,
+    archived = false,
+    limit = 36,
+    offset = 0,
+  } = params;
+
+  const conditions = [];
+
+  // Archived condition
+  if (archived) {
+    conditions.push(sql`${refs.archivedAt} IS NOT NULL`);
+  } else {
+    conditions.push(isNull(refs.archivedAt));
+  }
+
+  // Status condition
+  if (status && status !== "all") {
+    conditions.push(eq(refs.status, status as any));
+  }
+
+  // Unused condition: PRD §10.6 -> contentId IS NULL and status != 'skipped'
+  if (unusedOnly) {
+    conditions.push(isNull(refs.contentId));
+    conditions.push(sql`${refs.status} != 'skipped'`);
+  }
+
+  // Search text condition
+  if (searchText && searchText.trim()) {
+    const term = `%${searchText.trim().toLowerCase()}%`;
+    conditions.push(
+      or(
+        sql`lower(${refs.url}) LIKE ${term}`,
+        sql`lower(${refs.hookText}) LIKE ${term}`,
+        sql`lower(${refs.summary}) LIKE ${term}`,
+        sql`lower(${refs.notes}) LIKE ${term}`,
+        sql`${refs.searchText} LIKE ${term}`
+      )
+    );
+  }
+
+  // Platform slug condition
+  if (platformSlug && platformSlug !== "all") {
+    conditions.push(eq(platforms.slug, platformSlug));
+  }
+
+  // Format slug condition
+  if (formatSlug && formatSlug !== "all") {
+    conditions.push(eq(formats.slug, formatSlug));
+  }
+
+  // Pillar slug condition
+  if (pillarSlug && pillarSlug !== "all") {
+    conditions.push(
+      sql`EXISTS (
+        SELECT 1 FROM ${refPillars} rp
+        JOIN ${pillars} p ON p.id = rp.pillar_id
+        WHERE rp.ref_id = ${refs.id} AND p.slug = ${pillarSlug}
+      )`
+    );
+  }
+
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+  // Count total matching
+  const [totalRes] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(refs)
+    .leftJoin(platforms, eq(refs.platformId, platforms.id))
+    .leftJoin(formats, eq(refs.formatId, formats.id))
+    .where(whereClause);
+
+  const total = totalRes?.count || 0;
+
+  // Query records
+  const rows = await db
+    .select({
+      ref: refs,
+      platform: {
+        id: platforms.id,
+        name: platforms.name,
+        slug: platforms.slug,
+      },
+      format: {
+        id: formats.id,
+        name: formats.name,
+        slug: formats.slug,
+      },
+      hookType: {
+        id: hookTypes.id,
+        name: hookTypes.name,
+        slug: hookTypes.slug,
+      },
+      sourceAccount: {
+        id: sourceAccounts.id,
+        handle: sourceAccounts.handle,
+      },
+      audio: {
+        id: audios.id,
+        title: audios.title,
+        artist: audios.artist,
+      },
+    })
+    .from(refs)
+    .innerJoin(platforms, eq(refs.platformId, platforms.id))
+    .leftJoin(formats, eq(refs.formatId, formats.id))
+    .leftJoin(hookTypes, eq(refs.hookTypeId, hookTypes.id))
+    .leftJoin(sourceAccounts, eq(refs.sourceAccountId, sourceAccounts.id))
+    .leftJoin(audios, eq(refs.audioId, audios.id))
+    .where(whereClause)
+    .orderBy(desc(refs.savedAt))
+    .limit(limit)
+    .offset(offset);
+
+  if (rows.length === 0) {
+    return { items: [], total };
+  }
+
+  // Batch query pillars for returned references
+  const refIds = rows.map((r) => r.ref.id);
+  const refPillarsList = await db
+    .select({
+      refId: refPillars.refId,
+      pillarId: pillars.id,
+      name: pillars.name,
+      slug: pillars.slug,
+    })
+    .from(refPillars)
+    .innerJoin(pillars, eq(refPillars.pillarId, pillars.id))
+    .where(inArray(refPillars.refId, refIds));
+
+  const pillarMap = new Map<string, { id: string; name: string; slug: string }[]>();
+  for (const rp of refPillarsList) {
+    const list = pillarMap.get(rp.refId) || [];
+    list.push({ id: rp.pillarId, name: rp.name, slug: rp.slug });
+    pillarMap.set(rp.refId, list);
+  }
+
+  const items: ReferenceListItem[] = rows.map((r) => ({
+    id: r.ref.id,
+    url: r.ref.url,
+    urlOriginal: r.ref.urlOriginal,
+    status: r.ref.status,
+    summary: r.ref.summary,
+    hookText: r.ref.hookText,
+    visualNotes: r.ref.visualNotes,
+    notes: r.ref.notes,
+    tags: r.ref.tags || [],
+    skippedReason: r.ref.skippedReason,
+    contentId: r.ref.contentId,
+    contentPosition: r.ref.contentPosition,
+    savedAt: r.ref.savedAt,
+    statusChangedAt: r.ref.statusChangedAt,
+    archivedAt: r.ref.archivedAt,
+    platform: r.platform,
+    format: r.format?.id ? r.format : null,
+    hookType: r.hookType?.id ? r.hookType : null,
+    sourceAccount: r.sourceAccount?.id ? r.sourceAccount : null,
+    audio: r.audio?.id ? r.audio : null,
+    pillars: pillarMap.get(r.ref.id) || [],
+  }));
+
+  return { items, total };
+}
+
+/**
+ * Returns references in the inbox queue (status = 'inbox' and not archived), ordered by savedAt desc.
+ */
+export async function getInboxReferences(): Promise<ReferenceListItem[]> {
+  const result = await listReferences({ status: "inbox", limit: 100 });
+  return result.items;
+}
+
+/**
+ * Fetches a single reference with all relations and bedah elements.
+ */
+export async function getReferenceById(id: string): Promise<ReferenceListItem | null> {
+  const [row] = await db
+    .select({
+      ref: refs,
+      platform: {
+        id: platforms.id,
+        name: platforms.name,
+        slug: platforms.slug,
+      },
+      format: {
+        id: formats.id,
+        name: formats.name,
+        slug: formats.slug,
+      },
+      hookType: {
+        id: hookTypes.id,
+        name: hookTypes.name,
+        slug: hookTypes.slug,
+      },
+      sourceAccount: {
+        id: sourceAccounts.id,
+        handle: sourceAccounts.handle,
+      },
+      audio: {
+        id: audios.id,
+        title: audios.title,
+        artist: audios.artist,
+      },
+    })
+    .from(refs)
+    .innerJoin(platforms, eq(refs.platformId, platforms.id))
+    .leftJoin(formats, eq(refs.formatId, formats.id))
+    .leftJoin(hookTypes, eq(refs.hookTypeId, hookTypes.id))
+    .leftJoin(sourceAccounts, eq(refs.sourceAccountId, sourceAccounts.id))
+    .leftJoin(audios, eq(refs.audioId, audios.id))
+    .where(eq(refs.id, id))
+    .limit(1);
+
+  if (!row) return null;
+
+  const [refPillarsList, refElementsList] = await Promise.all([
+    db
+      .select({
+        id: pillars.id,
+        name: pillars.name,
+        slug: pillars.slug,
+      })
+      .from(refPillars)
+      .innerJoin(pillars, eq(refPillars.pillarId, pillars.id))
+      .where(eq(refPillars.refId, id)),
+    db
+      .select({
+        element: refElements.element,
+      })
+      .from(refElements)
+      .where(eq(refElements.refId, id)),
+  ]);
+
+  return {
+    id: row.ref.id,
+    url: row.ref.url,
+    urlOriginal: row.ref.urlOriginal,
+    status: row.ref.status,
+    summary: row.ref.summary,
+    hookText: row.ref.hookText,
+    visualNotes: row.ref.visualNotes,
+    notes: row.ref.notes,
+    tags: row.ref.tags || [],
+    skippedReason: row.ref.skippedReason,
+    contentId: row.ref.contentId,
+    contentPosition: row.ref.contentPosition,
+    savedAt: row.ref.savedAt,
+    statusChangedAt: row.ref.statusChangedAt,
+    archivedAt: row.ref.archivedAt,
+    platform: row.platform,
+    format: row.format?.id ? row.format : null,
+    hookType: row.hookType?.id ? row.hookType : null,
+    sourceAccount: row.sourceAccount?.id ? row.sourceAccount : null,
+    audio: row.audio?.id ? row.audio : null,
+    pillars: refPillarsList,
+    elements: refElementsList.map((e) => e.element),
+  };
 }

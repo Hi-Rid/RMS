@@ -2,9 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { eq, and, sql, inArray } from "drizzle-orm";
+import { db, withTx } from "@/lib/db";
+import { refs, refPillars, refElements, sourceAccounts, audios } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
 import { normalizeUrl, extractUrls } from "@/lib/domain/url";
+import { normalizeHandle, normalizeTag } from "@/lib/domain/normalize";
+import { isAllowedRefTransition } from "@/lib/domain/status";
 import {
   getPlatformIdBySlug,
   getFormatIdBySlug,
@@ -288,3 +293,442 @@ export async function importReferencesFromUrls(
 
   return ok({ created, duplicates });
 }
+
+const setStatusSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["inbox", "selected"]),
+});
+
+/**
+ * Transitions reference between inbox <-> selected (PRD §10.3 / §11.8).
+ */
+export async function setReferenceStatus(
+  input: z.infer<typeof setStatusSchema>
+): Promise<ActionResult<{ id: string; status: string }>> {
+  await requireActionOwner();
+
+  const parsed = setStatusSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid status transition");
+  }
+
+  const [ref] = await db
+    .select({ id: refs.id, status: refs.status, contentId: refs.contentId })
+    .from(refs)
+    .where(eq(refs.id, parsed.data.id))
+    .limit(1);
+
+  if (!ref) {
+    return fail("not_found", "Reference not found");
+  }
+
+  if (!isAllowedRefTransition(ref.status, parsed.data.status, Boolean(ref.contentId))) {
+    return fail("blocked", `Cannot move reference from ${ref.status} to ${parsed.data.status}`);
+  }
+
+  await db
+    .update(refs)
+    .set({
+      status: parsed.data.status,
+      statusChangedAt: sql`now()`,
+    })
+    .where(eq(refs.id, parsed.data.id));
+
+  revalidatePath("/");
+  revalidatePath("/inbox");
+  revalidatePath("/inbox/triage");
+  revalidatePath("/references");
+  revalidatePath(`/references/${parsed.data.id}`);
+
+  return ok({ id: parsed.data.id, status: parsed.data.status });
+}
+
+const skipSchema = z.object({
+  id: z.string().uuid(),
+  reason: z.string().optional(),
+});
+
+/**
+ * Marks reference as skipped with optional reason (PRD §10.3 / §11.8).
+ */
+export async function skipReference(
+  input: z.infer<typeof skipSchema>
+): Promise<ActionResult<{ id: string }>> {
+  await requireActionOwner();
+
+  const parsed = skipSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", "Invalid reference ID");
+  }
+
+  const [ref] = await db
+    .select({ id: refs.id, status: refs.status, contentId: refs.contentId })
+    .from(refs)
+    .where(eq(refs.id, parsed.data.id))
+    .limit(1);
+
+  if (!ref) {
+    return fail("not_found", "Reference not found");
+  }
+
+  if (Boolean(ref.contentId)) {
+    return fail("blocked", "Cannot skip reference attached to content");
+  }
+
+  await db
+    .update(refs)
+    .set({
+      status: "skipped",
+      skippedReason: parsed.data.reason?.trim() || null,
+      statusChangedAt: sql`now()`,
+    })
+    .where(eq(refs.id, parsed.data.id));
+
+  revalidatePath("/");
+  revalidatePath("/inbox");
+  revalidatePath("/inbox/triage");
+  revalidatePath("/references");
+
+  return ok({ id: parsed.data.id });
+}
+
+const unskipSchema = z.object({
+  id: z.string().uuid(),
+  to: z.enum(["inbox", "selected"]).optional().default("inbox"),
+});
+
+/**
+ * Restores a skipped reference back to inbox or selected.
+ */
+export async function unskipReference(
+  input: z.infer<typeof unskipSchema>
+): Promise<ActionResult<{ id: string; status: string }>> {
+  await requireActionOwner();
+
+  const parsed = unskipSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", "Invalid parameters");
+  }
+
+  await db
+    .update(refs)
+    .set({
+      status: parsed.data.to,
+      skippedReason: null,
+      statusChangedAt: sql`now()`,
+    })
+    .where(eq(refs.id, parsed.data.id));
+
+  revalidatePath("/");
+  revalidatePath("/inbox");
+  revalidatePath("/references");
+
+  return ok({ id: parsed.data.id, status: parsed.data.to });
+}
+
+const idSchema = z.object({
+  id: z.string().uuid(),
+});
+
+/**
+ * Soft archives a reference (PRD §10.11).
+ */
+export async function archiveReference(
+  input: z.infer<typeof idSchema>
+): Promise<ActionResult<{ id: string }>> {
+  await requireActionOwner();
+
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return fail("validation", "Invalid ID");
+
+  await db
+    .update(refs)
+    .set({ archivedAt: sql`now()` })
+    .where(eq(refs.id, parsed.data.id));
+
+  revalidatePath("/");
+  revalidatePath("/inbox");
+  revalidatePath("/references");
+
+  return ok({ id: parsed.data.id });
+}
+
+/**
+ * Restores an archived reference.
+ */
+export async function restoreReference(
+  input: z.infer<typeof idSchema>
+): Promise<ActionResult<{ id: string }>> {
+  await requireActionOwner();
+
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return fail("validation", "Invalid ID");
+
+  await db
+    .update(refs)
+    .set({ archivedAt: null })
+    .where(eq(refs.id, parsed.data.id));
+
+  revalidatePath("/");
+  revalidatePath("/inbox");
+  revalidatePath("/references");
+
+  return ok({ id: parsed.data.id });
+}
+
+/**
+ * Permanently deletes a reference (blocked if attached to content, PRD §10.11).
+ */
+export async function deleteReferencePermanently(
+  input: z.infer<typeof idSchema>
+): Promise<ActionResult<{ id: string }>> {
+  await requireActionOwner();
+
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return fail("validation", "Invalid ID");
+
+  const [ref] = await db
+    .select({ id: refs.id, contentId: refs.contentId })
+    .from(refs)
+    .where(eq(refs.id, parsed.data.id))
+    .limit(1);
+
+  if (!ref) return fail("not_found", "Reference not found");
+  if (ref.contentId) {
+    return fail("blocked", "Cannot delete reference that is linked to content");
+  }
+
+  await db.delete(refs).where(eq(refs.id, parsed.data.id));
+
+  revalidatePath("/");
+  revalidatePath("/inbox");
+  revalidatePath("/references");
+
+  return ok({ id: parsed.data.id });
+}
+
+const saveCaptureSchema = z.object({
+  id: z.string().uuid(),
+  pillarIds: z.array(z.string().uuid()).optional(),
+  formatId: z.string().uuid().nullable().optional(),
+  sourceHandle: z.string().optional(),
+  audioTitle: z.string().optional(),
+  audioArtist: z.string().optional(),
+  hookText: z.string().optional(),
+  hookTypeId: z.string().uuid().nullable().optional(),
+  visualNotes: z.string().optional(),
+  notes: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  summary: z.string().optional(),
+});
+
+/**
+ * Saves quick capture details on a reference (PRD §12.5).
+ */
+export async function saveCapture(
+  input: z.infer<typeof saveCaptureSchema>
+): Promise<ActionResult<{ id: string }>> {
+  await requireActionOwner();
+
+  const parsed = saveCaptureSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid capture data");
+  }
+
+  const {
+    id,
+    pillarIds,
+    formatId,
+    sourceHandle,
+    audioTitle,
+    audioArtist,
+    hookText,
+    hookTypeId,
+    visualNotes,
+    notes,
+    tags,
+    summary,
+  } = parsed.data;
+
+  return await withTx(async (tx) => {
+    // 1. Fetch current ref
+    const [currentRef] = await tx
+      .select({
+        id: refs.id,
+        platformId: refs.platformId,
+        url: refs.url,
+      })
+      .from(refs)
+      .where(eq(refs.id, id))
+      .limit(1);
+
+    if (!currentRef) return fail("not_found", "Reference not found");
+
+    // 2. Handle Source Account if handle provided
+    let sourceAccountId: string | undefined = undefined;
+    if (sourceHandle && sourceHandle.trim()) {
+      const cleanHandle = normalizeHandle(sourceHandle);
+      if (cleanHandle) {
+        const [existingSource] = await tx
+          .select({ id: sourceAccounts.id })
+          .from(sourceAccounts)
+          .where(
+            and(
+              eq(sourceAccounts.platformId, currentRef.platformId),
+              eq(sourceAccounts.handle, cleanHandle)
+            )
+          )
+          .limit(1);
+
+        if (existingSource) {
+          sourceAccountId = existingSource.id;
+        } else {
+          const [createdSource] = await tx
+            .insert(sourceAccounts)
+            .values({
+              platformId: currentRef.platformId,
+              handle: cleanHandle,
+            })
+            .returning({ id: sourceAccounts.id });
+          sourceAccountId = createdSource.id;
+        }
+      }
+    }
+
+    // 3. Handle Audio if title provided
+    let audioId: string | undefined = undefined;
+    if (audioTitle && audioTitle.trim()) {
+      const cleanTitle = audioTitle.trim();
+      const cleanArtist = (audioArtist || "").trim();
+
+      const [existingAudio] = await tx
+        .select({ id: audios.id })
+        .from(audios)
+        .where(
+          and(
+            sql`lower(btrim(${audios.title})) = lower(btrim(${cleanTitle}))`,
+            sql`lower(btrim(${audios.artist})) = lower(btrim(${cleanArtist}))`
+          )
+        )
+        .limit(1);
+
+      if (existingAudio) {
+        audioId = existingAudio.id;
+      } else {
+        const [createdAudio] = await tx
+          .insert(audios)
+          .values({
+            title: cleanTitle,
+            artist: cleanArtist,
+          })
+          .returning({ id: audios.id });
+        audioId = createdAudio.id;
+      }
+    }
+
+    // 4. Normalize tags
+    const normalizedTags = (tags || []).map(normalizeTag).filter(Boolean);
+
+    // 5. Generate search text
+    const searchParts = [
+      currentRef.url,
+      hookText || "",
+      notes || "",
+      visualNotes || "",
+      summary || "",
+      sourceHandle || "",
+      normalizedTags.join(" "),
+    ];
+    const searchText = searchParts.filter(Boolean).join(" ").toLowerCase();
+
+    // 6. Update refs row
+    const updateValues: Record<string, any> = {
+      searchText,
+      tags: normalizedTags,
+    };
+    if (formatId !== undefined) updateValues.formatId = formatId;
+    if (sourceAccountId !== undefined) updateValues.sourceAccountId = sourceAccountId;
+    if (audioId !== undefined) updateValues.audioId = audioId;
+    if (hookText !== undefined) updateValues.hookText = hookText;
+    if (hookTypeId !== undefined) updateValues.hookTypeId = hookTypeId;
+    if (visualNotes !== undefined) updateValues.visualNotes = visualNotes;
+    if (notes !== undefined) updateValues.notes = notes;
+    if (summary !== undefined) updateValues.summary = summary;
+
+    await tx.update(refs).set(updateValues).where(eq(refs.id, id));
+
+    // 7. Sync pillars if provided
+    if (pillarIds) {
+      await tx.delete(refPillars).where(eq(refPillars.refId, id));
+      if (pillarIds.length > 0) {
+        await tx.insert(refPillars).values(
+          pillarIds.map((pId) => ({
+            refId: id,
+            pillarId: pId,
+          }))
+        );
+      }
+    }
+
+    revalidatePath("/");
+    revalidatePath("/inbox");
+    revalidatePath("/references");
+    revalidatePath(`/references/${id}`);
+
+    return ok({ id });
+  });
+}
+
+const saveBedahSchema = z.object({
+  id: z.string().uuid(),
+  hookText: z.string().optional(),
+  hookTypeId: z.string().uuid().nullable().optional(),
+  visualNotes: z.string().optional(),
+  notes: z.string().optional(),
+  elements: z.array(z.enum(["idea", "hook", "audio", "visual", "topic"])).optional(),
+});
+
+/**
+ * Saves Bedah breakdown on a reference (PRD §12.5).
+ */
+export async function saveBedah(
+  input: z.infer<typeof saveBedahSchema>
+): Promise<ActionResult<{ id: string }>> {
+  await requireActionOwner();
+
+  const parsed = saveBedahSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid bedah data");
+  }
+
+  const { id, hookText, hookTypeId, visualNotes, notes, elements } = parsed.data;
+
+  return await withTx(async (tx) => {
+    const updateValues: Record<string, any> = {};
+    if (hookText !== undefined) updateValues.hookText = hookText;
+    if (hookTypeId !== undefined) updateValues.hookTypeId = hookTypeId;
+    if (visualNotes !== undefined) updateValues.visualNotes = visualNotes;
+    if (notes !== undefined) updateValues.notes = notes;
+
+    if (Object.keys(updateValues).length > 0) {
+      await tx.update(refs).set(updateValues).where(eq(refs.id, id));
+    }
+
+    if (elements) {
+      await tx.delete(refElements).where(eq(refElements.refId, id));
+      if (elements.length > 0) {
+        await tx.insert(refElements).values(
+          elements.map((el) => ({
+            refId: id,
+            element: el,
+          }))
+        );
+      }
+    }
+
+    revalidatePath(`/references/${id}`);
+    revalidatePath("/references");
+    return ok({ id });
+  });
+}
+

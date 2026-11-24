@@ -1,21 +1,23 @@
-import { Bookmark } from "lucide-react";
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { notFound } from "next/navigation";
+import { getReferenceById, getMasterData } from "@/lib/queries/references";
+import { ReferenceDetailClient } from "./reference-detail-client";
 
-export default async function ReferenceDetailPage({
-  params,
-}: {
+export const instant = false;
+
+interface ReferencePageProps {
   params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
+}
 
-  return (
-    <PlaceholderPage
-      title={`Reference Detail`}
-      description={`Inspect images, quick capture details, hook breakdowns, and linked contents for reference ${id}.`}
-      phase="Prompt P5"
-      icon={<Bookmark className="size-6" />}
-      backHref="/references"
-      backLabel="Back to References"
-    />
-  );
+export default async function ReferenceDetailPage({ params }: ReferencePageProps) {
+  const { id } = await params;
+  const [reference, masterData] = await Promise.all([
+    getReferenceById(id),
+    getMasterData(),
+  ]);
+
+  if (!reference) {
+    notFound();
+  }
+
+  return <ReferenceDetailClient reference={reference} masterData={masterData} />;
 }

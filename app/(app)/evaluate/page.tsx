@@ -1,13 +1,24 @@
-import { CheckSquare } from "lucide-react";
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { listSnapshots } from "@/lib/queries/snapshots";
+import { EvaluateClient } from "./evaluate-client";
 
-export default function EvaluatePage() {
+export const instant = false;
+
+interface EvaluatePageProps {
+  searchParams: Promise<{
+    filter?: "due" | "upcoming" | "done";
+  }>;
+}
+
+export default async function EvaluatePage({ searchParams }: EvaluatePageProps) {
+  const { filter = "due" } = await searchParams;
+
+  const { items, counts } = await listSnapshots({ filter });
+
   return (
-    <PlaceholderPage
-      title="Evaluation & Snapshots"
-      description="Record performance checkpoints at 24h, 7d, and 30d (views, likes, retention, rating) to measure content success."
-      phase="Prompt P10"
-      icon={<CheckSquare className="size-6" />}
+    <EvaluateClient
+      initialItems={items}
+      counts={counts}
+      activeTab={filter}
     />
   );
 }
