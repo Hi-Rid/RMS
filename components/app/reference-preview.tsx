@@ -100,6 +100,13 @@ export function ReferencePreview({
   const youtubeId = extractYouTubeId(url);
   const PlatformIcon = details.icon;
 
+  const isVertical =
+    format?.toLowerCase().includes("reel") ||
+    format?.toLowerCase().includes("short") ||
+    format?.toLowerCase().includes("story") ||
+    platform?.toLowerCase() === "instagram" ||
+    platform?.toLowerCase() === "tiktok";
+
   // Direct media thumbnail from Microlink for Instagram, TikTok, Threads, X, Facebook
   const directEmbedUrl = url
     ? `https://api.microlink.io/?url=${encodeURIComponent(url)}&embed=image.url`
@@ -115,23 +122,45 @@ export function ReferencePreview({
       ? directEmbedUrl
       : null;
 
+  // Default container aspect ratio: aspect-[4/5] for reels/shorts/vertical, or custom className
+  const containerAspect = className || (isVertical ? "aspect-[4/5]" : "aspect-[16/10]");
+
   return (
     <div
-      className={`relative w-full aspect-[16/9] sm:aspect-[16/10] rounded-md overflow-hidden bg-secondary/80 border ${details.border} group/preview ${className}`}
+      className={`relative w-full ${containerAspect} rounded-md overflow-hidden bg-secondary/80 border ${details.border} group/preview`}
     >
       {activeThumbnail ? (
-        <>
-          {/* Real Thumbnail Image */}
+        <div className="relative w-full h-full overflow-hidden flex items-center justify-center bg-black/95">
+          {/* Ambient Blurred Background (Fills left and right empty spaces with matching video blur) */}
           <img
             src={activeThumbnail}
-            alt={hookText || summary || "Reference Preview"}
-            loading="lazy"
-            onError={() => setImageError(true)}
-            className="w-full h-full object-cover transition-transform duration-300 group-hover/preview:scale-[1.03]"
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 w-full h-full object-cover blur-2xl scale-125 opacity-40 brightness-75 select-none pointer-events-none"
           />
-          {/* Subtle dark gradient overlay for text readability */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-        </>
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-md pointer-events-none" />
+
+          {/* Uncropped 9:16 Video Thumbnail in Center */}
+          <div className="relative z-10 h-full w-full flex items-center justify-center p-0">
+            <img
+              src={activeThumbnail}
+              alt={hookText || summary || "Reference Preview"}
+              loading="lazy"
+              onError={() => setImageError(true)}
+              className="h-full w-auto max-w-full object-contain aspect-[9/16] shadow-2xl select-none transition-transform duration-300 group-hover/preview:scale-[1.02]"
+            />
+          </div>
+
+          {/* Center Play Button Watermark */}
+          <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+            <div className="size-11 rounded-full bg-black/55 border border-white/20 backdrop-blur-sm flex items-center justify-center text-white shadow-xl transition-transform duration-200 group-hover/preview:scale-110">
+              <Play className="size-5 ml-0.5 fill-current text-white" />
+            </div>
+          </div>
+
+          {/* Vignette gradient overlay */}
+          <div className="absolute inset-0 z-15 pointer-events-none bg-gradient-to-t from-black/70 via-transparent to-black/30" />
+        </div>
       ) : (
         /* Stylized Media Poster Substrate (PRD §12.0) */
         <div
@@ -185,18 +214,35 @@ export function ReferencePreview({
         </div>
       )}
 
+      {/* Persistent Top Overlay: Platform Badge (when image thumbnail is active) */}
+      {activeThumbnail && (
+        <div className="absolute top-2.5 left-2.5 z-30 flex items-center gap-1.5 pointer-events-none">
+          <span
+            className={`text-[10px] font-mono uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${details.pillBg} flex items-center gap-1 shadow-xs backdrop-blur-xs`}
+          >
+            <PlatformIcon className="size-3" />
+            <span>{details.name}</span>
+          </span>
+          {format && (
+            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/60 text-white/90 border border-white/20 backdrop-blur-xs">
+              {format}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Persistent Bottom Bar on Preview */}
-      <div className="absolute inset-x-0 bottom-0 p-2.5 z-20 flex items-center justify-between pointer-events-none text-white drop-shadow-sm">
+      <div className="absolute inset-x-0 bottom-0 p-2.5 z-30 flex items-center justify-between pointer-events-none text-white drop-shadow-sm">
         <div className="flex items-center gap-1.5">
           {handle && (
-            <span className="text-[11px] font-mono font-bold bg-black/60 px-1.5 py-0.5 rounded backdrop-blur-xs text-white/90">
+            <span className="text-[11px] font-mono font-bold bg-black/70 px-1.5 py-0.5 rounded backdrop-blur-xs text-white/95 border border-white/10">
               @{handle}
             </span>
           )}
         </div>
 
         {/* Center/Right Play Watermark Indicator */}
-        <div className="flex items-center gap-1 text-[10px] font-mono uppercase font-bold bg-black/60 px-2 py-0.5 rounded backdrop-blur-xs text-white/90">
+        <div className="flex items-center gap-1 text-[10px] font-mono uppercase font-bold bg-black/70 px-2 py-0.5 rounded backdrop-blur-xs text-white/95 border border-white/10">
           <Play className="size-2.5 fill-current" />
           <span>{details.badge}</span>
         </div>
@@ -209,7 +255,7 @@ export function ReferencePreview({
         rel="noopener noreferrer"
         title="Open original video"
         onClick={(e) => e.stopPropagation()}
-        className="absolute top-2 right-2 z-30 size-7 rounded-md bg-black/70 hover:bg-black text-white flex items-center justify-center transition-all opacity-90 hover:opacity-100 shadow-sm"
+        className="absolute top-2.5 right-2.5 z-30 size-7 rounded-md bg-black/70 hover:bg-black text-white flex items-center justify-center transition-all opacity-90 hover:opacity-100 shadow-sm border border-white/10"
       >
         <ExternalLink className="size-3.5" />
       </a>
