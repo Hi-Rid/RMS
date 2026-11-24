@@ -100,12 +100,19 @@ export function ReferencePreview({
   const youtubeId = extractYouTubeId(url);
   const PlatformIcon = details.icon;
 
+  // Direct media thumbnail from Microlink for Instagram, TikTok, Threads, X, Facebook
+  const directEmbedUrl = url
+    ? `https://api.microlink.io/?url=${encodeURIComponent(url)}&embed=image.url`
+    : null;
+
   // Resolve active image thumbnail
   const activeThumbnail =
     coverUrl && !imageError
       ? coverUrl
       : youtubeId && !imageError
       ? `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
+      : directEmbedUrl && !imageError
+      ? directEmbedUrl
       : null;
 
   return (

@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/app/status-badge";
+import { ReferencePreview } from "@/components/app/reference-preview";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -251,41 +252,69 @@ export function ReferenceDetailClient({
         </div>
       </div>
 
-      {/* Main Header Card */}
+      {/* Main Header & Visual Media Preview */}
       <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-foreground text-background">
-                {reference.platform.name}
-              </span>
-              {reference.format && (
-                <span className="text-xs font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
-                  {reference.format.name}
-                </span>
-              )}
-              <StatusBadge status={reference.status} />
-            </div>
-
-            <h1 className="text-lg sm:text-xl font-black font-display tracking-tight text-foreground">
-              {reference.hookText || reference.summary || "Untitled Reference"}
-            </h1>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
+          {/* Visual Media Preview Poster */}
+          <div className="md:col-span-1 w-full max-w-[240px] mx-auto md:mx-0">
+            <ReferencePreview
+              url={reference.url}
+              platform={reference.platform.slug}
+              format={reference.format?.name}
+              coverUrl={null}
+              hookText={reference.hookText}
+              summary={reference.summary}
+              handle={reference.sourceAccount?.handle}
+              className="aspect-[9/16] rounded-lg shadow-xs"
+            />
           </div>
 
-          <a
-            href={reference.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground border border-border rounded px-3 py-1.5 hover:bg-secondary transition-colors"
-          >
-            <span>Open Link</span>
-            <ExternalLink className="size-3.5" />
-          </a>
-        </div>
+          {/* Details & Metadata */}
+          <div className="md:col-span-3 space-y-4 flex flex-col justify-between h-full">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-foreground text-background">
+                    {reference.platform.name}
+                  </span>
+                  {reference.format && (
+                    <span className="text-xs font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
+                      {reference.format.name}
+                    </span>
+                  )}
+                  <StatusBadge status={reference.status} />
+                </div>
 
-        {/* Ingested URL */}
-        <div className="p-3 rounded bg-secondary/50 border border-border font-mono text-xs text-muted-foreground break-all">
-          {reference.urlOriginal || reference.url}
+                <a
+                  href={reference.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground border border-border rounded px-3 py-1.5 hover:bg-secondary transition-colors"
+                >
+                  <span>Open Original Post</span>
+                  <ExternalLink className="size-3.5" />
+                </a>
+              </div>
+
+              <h1 className="text-lg sm:text-2xl font-black font-display tracking-tight text-foreground pt-1">
+                {reference.hookText || reference.summary || "Untitled Reference"}
+              </h1>
+
+              {reference.sourceAccount?.handle && (
+                <div className="text-xs font-mono text-muted-foreground">
+                  Creator:{" "}
+                  <span className="text-foreground font-bold">
+                    @{reference.sourceAccount.handle}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Ingested URL */}
+            <div className="p-3 rounded bg-secondary/50 border border-border font-mono text-xs text-muted-foreground break-all">
+              {reference.urlOriginal || reference.url}
+            </div>
+          </div>
         </div>
       </div>
 

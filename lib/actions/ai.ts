@@ -42,12 +42,12 @@ export async function aiBedahReference(
         model,
         output: Output.object({
           schema: z.object({
-            hookText: z.string().describe("Opening 3-second hook that captures viewer attention"),
-            hookType: z.string().describe("Hook archetype (e.g. Curiosity Gap, Bold Claim, Contrarian, Relatable Pain Point)"),
-            visualNotes: z.string().describe("Visual styling, pacing, transition, or B-roll cues"),
-            keyTakeaway: z.string().describe("Core psychological trigger why this content succeeded"),
-            adaptIdeas: z.array(z.string()).min(3).max(4).describe("3 original adaptation ideas distinct from source"),
-            suggestedTags: z.array(z.string()).min(2).max(5).describe("Relevant topic category tags"),
+            hookText: z.string().describe("Kalimat hook 3 detik pertama yang memikat audiens dalam Bahasa Indonesia"),
+            hookType: z.string().describe("Tipe hook psikologis (misal: Curiosity Gap, Masalah Relate, Klaim Berani, Kontrarian)"),
+            visualNotes: z.string().describe("Catatan visual styling, framing, transisi, pacing, atau B-roll dalam Bahasa Indonesia"),
+            keyTakeaway: z.string().describe("Pelajaran inti mengapa konten ini berhasil memikat penonton dalam Bahasa Indonesia"),
+            adaptIdeas: z.array(z.string()).min(3).max(4).describe("3 ide adaptasi original yang berbeda dari sumber dalam Bahasa Indonesia"),
+            suggestedTags: z.array(z.string()).min(2).max(5).describe("Tag kategori topik yang relevan dalam Bahasa Indonesia"),
           }),
         }),
         prompt: `You are an expert short-form video content strategist and hook breakdown specialist (Reels, Shorts, TikTok).
@@ -55,7 +55,9 @@ Perform an in-depth breakdown of this reference content:
 Platform: ${input.platform || "Social Media"}
 Content/URL: "${input.text}"
 
-Provide clear, sharp, actionable breakdown insights focused on original content creation.`,
+WAJIB DIPATUHI:
+Tulis SELURUH hasil bedah (hookText, hookType, visualNotes, keyTakeaway, adaptIdeas, suggestedTags) MENGGUNAKAN BAHASA INDONESIA yang kasual, tajam, dan aplikatif untuk content creator solo.
+Berikan analisis yang fokus pada orisinalitas dan cara mengadaptasi ide tersebut tanpa menjiplak.`,
       });
 
       return res.output;
@@ -104,19 +106,20 @@ export async function aiGenerateHooks(
           schema: z.object({
             hooks: z.array(
               z.object({
-                text: z.string().describe("Opening hook line, 1-2 punchy sentences (max 14 words)"),
-                archetype: z.string().describe("Hook archetype: Curiosity, Contrarian, Negative, Relatable, Data/Result, Question"),
-                whyItWorks: z.string().describe("Brief psychological reason why this stops the scroll"),
+                text: z.string().describe("Kalimat hook pembuka 1-2 kalimat tajam (maksimal 14 kata) dalam Bahasa Indonesia"),
+                archetype: z.string().describe("Sudut pandang hook: Rasa Ingin Tahu, Kontrarian, Masalah Relate, Pertanyaan, dsb."),
+                whyItWorks: z.string().describe("Alasan psikologis mengapa hook ini langsung menghentikan scroll dalam Bahasa Indonesia"),
               })
             ).min(5).max(7),
           }),
         }),
-        prompt: `Generate 6 high-conversion short-form video opening hooks that immediately stop the scroll.
-Topic: "${input.topic}"
-Content Pillar: "${input.pillar || "General"}"
+        prompt: `Buat 6 variasi hook pembuka video pendek (Reels, TikTok, Shorts) yang langsung menghentikan scroll penonton.
+Topik: "${input.topic}"
+Pilar Konten: "${input.pillar || "General"}"
 Format: "${input.format || "Short-form Video"}"
 
-Tone: Natural, confident, direct, and conversational.`,
+WAJIB DIPATUHI:
+Tulis seluruh hook dan alasan psikologisnya dalam BAHASA INDONESIA yang kasual, percaya diri, dan alami untuk creator.`,
       });
 
       return res.output;
@@ -155,18 +158,17 @@ export async function aiDraftScript(
     const output = await runWithModelFallback(async (model) => {
       const { text } = await generateText({
         model,
-        prompt: `Create a 45-60 second high-retention short-form video production script:
-Content Title: "${input.title}"
-Opening Hook: "${input.hookText || "Craft the strongest opening hook"}"
-Concept Notes: "${input.notes || "None"}"
+        prompt: `Buat naskah produksi video pendek (45-60 detik) berdurasi tinggi dan ber-retensi kuat untuk content creator solo:
+Judul Konten: "${input.title}"
+Kalimat Hook Pembuka: "${input.hookText || "Rancang hook pembuka paling memikat"}"
+Catatan Konsep: "${input.notes || "None"}"
 
-Structure the script into 4 clear production blocks:
-1. [00:00 - 00:03] THE HOOK: Punchy opening line + fast visual framing cue
-2. [00:03 - 00:15] THE PROBLEM / TENSION: Why the viewer must care + the core obstacle
-3. [00:15 - 00:45] THE INSIGHT / VALUE: Practical solution (2-3 crisp points) + B-roll visual directions
-4. [00:45 - 00:60] THE PAYOFF & CTA: Sharp closing takeaway + call to action (comment/save)
-
-Tone: Confident, fast-paced, high retention.`,
+WAJIB DIPATUHI: Tulis naskah dalam BAHASA INDONESIA yang kasual, percaya diri, dan cepat.
+Bagi naskah menjadi 4 blok produksi yang jelas:
+1. [00:00 - 00:03] THE HOOK: Kalimat hook pembuka yang punchy + arahan visual framing cepat
+2. [00:03 - 00:15] THE PROBLEM / TENSION: Masalah inti penonton + mengapa harus peduli
+3. [00:15 - 00:45] THE INSIGHT / VALUE: Solusi praktis (2-3 poin tajam) + arahan visual B-roll / aksi
+4. [00:45 - 00:60] THE PAYOFF & CTA: Takeaway penutup tajam + ajakan interaksi (komen/save)`,
       });
 
       return { script: text };
@@ -230,15 +232,15 @@ export async function aiExplainPattern(
               .describe("Sample size and correlation vs causation caveat note"),
           }),
         }),
-        prompt: `You are an analytical short-form video strategist reviewing content outliers (${input.group === "high" ? "top performers" : "underperformers"}).
-Analyze these content items:
+        prompt: `Anda adalah analis strategi konten video pendek yang menganalisis kelompok outlier (${input.group === "high" ? "top performers" : "underperformers"}).
+Daftar konten:
 ${JSON.stringify(input.items, null, 2)}
 
-Rules:
-1. Do NOT make definitive causal claims (e.g. say 'tended to feature' or 'observed correlation', never 'caused high views').
-2. Point out common themes in hook archetype, formatting, or presentation styles.
-3. Explicitly state sample size limitations.
-4. Keep observations actionable, grounded in data, and concise.`,
+Aturan:
+1. Tulis seluruh analisis dalam BAHASA INDONESIA yang lugas, tajam, dan objektif.
+2. JANGAN membuat klaim kausal mutlak (gunakan istilah seperti 'cenderung memiliki' atau 'korelasi teramati', bukan 'menyebabkan').
+3. Soroti kesamaan pola pada arketipe hook, format, atau gaya penyampaian.
+4. Sebutkan keterbatasan ukuran sampel secara eksplisit.`,
       });
 
       return res.output;
