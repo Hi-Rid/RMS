@@ -53,122 +53,116 @@ const defaultCounts: SidebarCounts = {
   },
 };
 
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ]);
-}
-
 export const getSidebarCounts = cache(async (): Promise<SidebarCounts> => {
-  const fetchCounts = async (): Promise<SidebarCounts> => {
-    try {
-      const [
-        statusCountsQuery,
-        contentCountRes,
-        dueSnapshotsRes,
-        audioRes,
-        sourcesRes,
-        snippetsRes,
-        activePillars,
-        pillarCountsQuery,
-      ] = await Promise.all([
-        db
-          .select({
-            status: refs.status,
-            count: sql<number>`count(*)::int`,
-          })
-          .from(refs)
-          .where(isNull(refs.archivedAt))
-          .groupBy(refs.status),
+  try {
+    const [
+      statusCountsQuery,
+      contentCountRes,
+      dueSnapshotsRes,
+      audioRes,
+      sourcesRes,
+      snippetsRes,
+      activePillars,
+      pillarCountsQuery,
+    ] = await Promise.all([
+      db
+        .select({
+          status: refs.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(refs)
+        .where(isNull(refs.archivedAt))
+        .groupBy(refs.status)
+        .catch(() => []),
 
-        db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(contents)
-          .where(isNull(contents.archivedAt)),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(contents)
+        .where(isNull(contents.archivedAt))
+        .catch(() => [{ count: 0 }]),
 
-        db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(snapshots)
-          .where(
-            and(
-              eq(snapshots.status, "pending"),
-              sql`${snapshots.dueAt} <= now()`
-            )
-          ),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(snapshots)
+        .where(
+          and(
+            eq(snapshots.status, "pending"),
+            sql`${snapshots.dueAt} <= now()`
+          )
+        )
+        .catch(() => [{ count: 0 }]),
 
-        db.select({ count: sql<number>`count(*)::int` }).from(audios),
-        db.select({ count: sql<number>`count(*)::int` }).from(sourceAccounts),
-        db.select({ count: sql<number>`count(*)::int` }).from(snippets),
+      db.select({ count: sql<number>`count(*)::int` }).from(audios).catch(() => [{ count: 0 }]),
+      db.select({ count: sql<number>`count(*)::int` }).from(sourceAccounts).catch(() => [{ count: 0 }]),
+      db.select({ count: sql<number>`count(*)::int` }).from(snippets).catch(() => [{ count: 0 }]),
 
-        db
-          .select({
-            id: pillars.id,
-            name: pillars.name,
-            slug: pillars.slug,
-            sortOrder: pillars.sortOrder,
-          })
-          .from(pillars)
-          .where(eq(pillars.isActive, true))
-          .orderBy(pillars.sortOrder),
+      db
+        .select({
+          id: pillars.id,
+          name: pillars.name,
+          slug: pillars.slug,
+          sortOrder: pillars.sortOrder,
+        })
+        .from(pillars)
+        .where(eq(pillars.isActive, true))
+        .orderBy(pillars.sortOrder)
+        .catch(() => []),
 
-        db
-          .select({
-            pillarId: refPillars.pillarId,
-            count: sql<number>`count(*)::int`,
-          })
-          .from(refPillars)
-          .innerJoin(refs, and(eq(refPillars.refId, refs.id), isNull(refs.archivedAt)))
-          .groupBy(refPillars.pillarId),
-      ]);
+      db
+        .select({
+          pillarId: refPillars.pillarId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(refPillars)
+        .innerJoin(refs, and(eq(refPillars.refId, refs.id), isNull(refs.archivedAt)))
+        .groupBy(refPillars.pillarId)
+        .catch(() => []),
+    ]);
 
-      const statusMap = {
-        inbox: 0,
-        selected: 0,
-        production: 0,
-        posted: 0,
-        evaluating: 0,
-        skipped: 0,
-      };
+    const statusMap = {
+      inbox: 0,
+      selected: 0,
+      production: 0,
+      posted: 0,
+      evaluating: 0,
+      skipped: 0,
+    };
 
-      let totalActiveRefs = 0;
-      for (const row of statusCountsQuery) {
-        if (row.status && row.status in statusMap) {
-          statusMap[row.status as keyof typeof statusMap] = Number(row.count) || 0;
-        }
-        totalActiveRefs += Number(row.count) || 0;
+    let totalActiveRefs = 0;
+    for (const row of statusCountsQuery || []) {
+      if (row.status && row.status in statusMap) {
+        statusMap[row.status as keyof typeof statusMap] = Number(row.count) || 0;
       }
-
-      const pillarCountMap = new Map<string, number>();
-      for (const row of pillarCountsQuery) {
-        pillarCountMap.set(row.pillarId, Number(row.count) || 0);
-      }
-
-      const pillarList = activePillars.map((p) => ({
-        id: p.id,
-        name: p.name,
-        slug: p.slug,
-        count: pillarCountMap.get(p.id) || 0,
-      }));
-
-      return {
-        inbox: statusMap.inbox,
-        references: totalActiveRefs,
-        contents: Number(contentCountRes[0]?.count) || 0,
-        evaluate: Number(dueSnapshotsRes[0]?.count) || 0,
-        audio: Number(audioRes[0]?.count) || 0,
-        sources: Number(sourcesRes[0]?.count) || 0,
-        captions: Number(snippetsRes[0]?.count) || 0,
-        pillars: pillarList,
-        statuses: statusMap,
-      };
-    } catch (err) {
-      console.error("Error in getSidebarCounts:", err);
-      return defaultCounts;
+      totalActiveRefs += Number(row.count) || 0;
     }
-  };
 
-  return withTimeout(fetchCounts(), 3000, defaultCounts);
+    const pillarCountMap = new Map<string, number>();
+    for (const row of pillarCountsQuery || []) {
+      pillarCountMap.set(row.pillarId, Number(row.count) || 0);
+    }
+
+    const pillarList = (activePillars || []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      count: pillarCountMap.get(p.id) || 0,
+    }));
+
+    return {
+      inbox: statusMap.inbox,
+      references: totalActiveRefs,
+      contents: Number(contentCountRes?.[0]?.count) || 0,
+      evaluate: Number(dueSnapshotsRes?.[0]?.count) || 0,
+      audio: Number(audioRes?.[0]?.count) || 0,
+      sources: Number(sourcesRes?.[0]?.count) || 0,
+      captions: Number(snippetsRes?.[0]?.count) || 0,
+      pillars: pillarList,
+      statuses: statusMap,
+    };
+  } catch (err) {
+    console.error("Error in getSidebarCounts:", err);
+    return defaultCounts;
+  }
 });
 
 export type HomeData = {
@@ -193,64 +187,55 @@ const defaultHomeData: HomeData = {
 };
 
 export const getHomeData = cache(async (): Promise<HomeData> => {
-  const fetchHome = async (): Promise<HomeData> => {
-    try {
-      const [counts, settingsQuery, weeklyPostsRes, recentRefsQuery] = await Promise.all([
-        getSidebarCounts(),
-        db
-          .select({ weeklyPostTarget: appSettings.weeklyPostTarget })
-          .from(appSettings)
-          .limit(1)
-          .catch(() => []),
-        db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(posts)
-          .where(
-            sql`posted_at >= date_trunc('week', now() at time zone 'Asia/Jakarta') at time zone 'Asia/Jakarta'`
-          )
-          .catch(() => [{ count: 0 }]),
-        db
-          .select({
-            id: refs.id,
-            url: refs.url,
-            summary: refs.summary,
-            status: refs.status,
-            savedAt: refs.savedAt,
-          })
-          .from(refs)
-          .where(isNull(refs.archivedAt))
-          .orderBy(sql`${refs.savedAt} desc`)
-          .limit(6)
-          .catch(() => []),
-      ]);
+  try {
+    const [counts, settingsQuery, weeklyPostsRes, recentRefsQuery] = await Promise.all([
+      getSidebarCounts(),
+      db
+        .select({ weeklyPostTarget: appSettings.weeklyPostTarget })
+        .from(appSettings)
+        .limit(1)
+        .catch(() => []),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(posts)
+        .where(
+          sql`posted_at >= date_trunc('week', now() at time zone 'Asia/Jakarta') at time zone 'Asia/Jakarta'`
+        )
+        .catch(() => [{ count: 0 }]),
+      db
+        .select({
+          id: refs.id,
+          url: refs.url,
+          summary: refs.summary,
+          status: refs.status,
+          savedAt: refs.savedAt,
+        })
+        .from(refs)
+        .where(isNull(refs.archivedAt))
+        .orderBy(sql`${refs.savedAt} desc`)
+        .limit(6)
+        .catch(() => []),
+    ]);
 
-      const weeklyTarget = settingsQuery[0]?.weeklyPostTarget ?? 3;
-      const weeklyPosted = Number(weeklyPostsRes[0]?.count) || 0;
+    const weeklyTarget = settingsQuery?.[0]?.weeklyPostTarget ?? 3;
+    const weeklyPosted = Number(weeklyPostsRes?.[0]?.count) || 0;
 
-      return {
-        counts,
-        weeklyTarget: {
-          target: weeklyTarget,
-          posted: weeklyPosted,
-        },
-        recentRefs: (recentRefsQuery || []).map((r) => ({
-          id: r.id,
-          url: r.url,
-          summary: r.summary,
-          status: r.status,
-          savedAt: r.savedAt ? String(r.savedAt) : new Date().toISOString(),
-        })),
-      };
-    } catch (err) {
-      console.error("Error in getHomeData:", err);
-      const counts = await getSidebarCounts();
-      return {
-        counts,
-        weeklyTarget: { target: 3, posted: 0 },
-        recentRefs: [],
-      };
-    }
-  };
-
-  return withTimeout(fetchHome(), 3500, defaultHomeData);
+    return {
+      counts,
+      weeklyTarget: {
+        target: weeklyTarget,
+        posted: weeklyPosted,
+      },
+      recentRefs: (recentRefsQuery || []).map((r) => ({
+        id: r.id,
+        url: r.url,
+        summary: r.summary,
+        status: r.status,
+        savedAt: r.savedAt ? String(r.savedAt) : new Date().toISOString(),
+      })),
+    };
+  } catch (err) {
+    console.error("Error in getHomeData:", err);
+    return defaultHomeData;
+  }
 });

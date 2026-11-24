@@ -5,6 +5,9 @@ import { getOwner } from "@/lib/auth/owner";
 import { DashboardView } from "@/app/(app)/dashboard-view";
 import { DashboardSkeleton } from "@/app/(app)/dashboard-skeleton";
 
+// Allow dynamic data access without blocking prerender warning
+export const instant = false;
+
 async function DashboardContent() {
   const [data, owner] = await Promise.all([
     getHomeData(),

@@ -10,15 +10,24 @@ import {
   CheckCircle2,
   CheckSquare,
   Clock,
-  ExternalLink,
+  Compass,
+  CornerDownLeft,
+  FileText,
+  Globe,
   Inbox,
   Layers,
   LineChart,
+  Lock,
+  MessageSquare,
   Music,
   Plus,
   Quote,
   Search,
+  Send,
   Sparkles,
+  TrendingUp,
+  X,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -34,6 +43,8 @@ interface DashboardViewProps {
 export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
   const [commandOpen, setCommandOpen] = React.useState(false);
   const [addLinksOpen, setAddLinksOpen] = React.useState(false);
+  const [focusCardDismissed, setFocusCardDismissed] = React.useState(false);
+  const [queryInput, setQueryInput] = React.useState("");
 
   // Compute completed steps
   const hasRefs = data.counts.references > 0;
@@ -43,16 +54,21 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
 
   // User display name from email (e.g. "Elise" from "elise@domain.com")
   const displayName = React.useMemo(() => {
-    if (!ownerEmail) return "Creator";
+    if (!ownerEmail) return "Elise";
     const localPart = ownerEmail.split("@")[0];
     return localPart.charAt(0).toUpperCase() + localPart.slice(1);
   }, [ownerEmail]);
+
+  const handleSearchSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setCommandOpen(true);
+  };
 
   return (
     <div className="relative min-h-full w-full py-10 px-4 sm:px-8 flex flex-col items-center">
       {/* Subtle fine dot/grid pattern background matching editorial style */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-[0.4]"
+        className="pointer-events-none absolute inset-0 opacity-[0.35]"
         style={{
           backgroundImage: `radial-gradient(var(--border) 1px, transparent 1px)`,
           backgroundSize: "24px 24px",
@@ -60,7 +76,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
       />
 
       <div className="relative w-full max-w-2xl flex flex-col items-center space-y-8">
-        {/* 1. Centered Hero Greeting Header */}
+        {/* 1. Centered Hero Header */}
         <div className="flex flex-col items-center text-center space-y-3">
           <div className="size-11 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-display font-black text-xl shadow-none">
             F
@@ -73,315 +89,330 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
           </p>
         </div>
 
-        {/* 2. Centered Search / Command Bar */}
+        {/* 2. Central Prompt / Command Box (Eksis Layout Twin) */}
         <div className="w-full space-y-3">
-          <button
-            type="button"
+          <div
             onClick={() => setCommandOpen(true)}
-            className="w-full h-[46px] rounded-lg bg-background border border-border px-4 flex items-center justify-between text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-all shadow-none group"
+            className="w-full rounded-xl bg-card border border-border p-3.5 sm:p-4 cursor-pointer hover:border-foreground/30 transition-all shadow-none group"
           >
-            <div className="flex items-center gap-3">
-              <Search className="size-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-              <span className="text-xs sm:text-sm text-muted-foreground group-hover:text-foreground transition-colors">
-                Search references, contents, or what to post next...
+            {/* Top Text / Prompt Line */}
+            <div className="flex items-start justify-between min-h-[44px]">
+              <span className="text-xs sm:text-sm text-muted-foreground group-hover:text-foreground transition-colors select-none font-sans">
+                Ask about your channels, posts, or what to post next
               </span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <kbd className="font-mono text-[10px] px-2 py-0.5 rounded bg-secondary text-secondary-foreground border border-border">
-                /
-              </kbd>
-              <kbd className="font-mono text-[10px] px-2 py-0.5 rounded bg-secondary text-secondary-foreground border border-border hidden sm:inline-block">
-                ⌘K
-              </kbd>
-            </div>
-          </button>
 
-          {/* Quick Action Pills row directly below the search bar */}
-          <div className="flex items-center justify-center flex-wrap gap-2 pt-1">
-            <PillButton
-              href="/inbox"
-              icon={<Inbox className="size-3.5" />}
-              label="Inbox"
-              count={data.counts.inbox}
-            />
-            <PillButton
-              href="/references"
-              icon={<Bookmark className="size-3.5" />}
-              label="References"
-              count={data.counts.references}
-            />
-            <PillButton
-              href="/contents"
-              icon={<Layers className="size-3.5" />}
-              label="Contents"
-              count={data.counts.contents}
-            />
-            <PillButton
-              href="/evaluate"
-              icon={<CheckSquare className="size-3.5" />}
-              label="Evaluate"
-              count={data.counts.evaluate}
-              highlight={data.counts.evaluate > 0}
-            />
-            <PillButton
-              href="/planner"
-              icon={<Calendar className="size-3.5" />}
-              label="Planning"
-            />
-            <PillButton
-              href="/captions"
-              icon={<Quote className="size-3.5" />}
-              label="Captions"
-            />
-            <PillButton
-              href="/insight"
-              icon={<LineChart className="size-3.5" />}
-              label="Analytics"
-            />
+            {/* Bottom Controls Bar inside the box */}
+            <div className="flex items-center justify-between pt-3 border-t border-border/40">
+              <div className="flex items-center gap-2">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider bg-secondary text-secondary-foreground border border-border/60">
+                  <Globe className="size-3 text-muted-foreground" />
+                  <span>Search the web</span>
+                </div>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider bg-secondary/60 text-muted-foreground border border-border/40">
+                  <Zap className="size-3" />
+                  <span>Off</span>
+                  <Lock className="size-2.5" />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-secondary text-secondary-foreground border border-border hidden sm:inline-block">
+                  ⌘K
+                </kbd>
+                <div className="size-7 rounded-md bg-primary text-primary-foreground flex items-center justify-center">
+                  <Send className="size-3.5 -rotate-45" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Action Category Buttons row (Matching Eksis layout) */}
+          <div className="flex flex-col items-center gap-2 pt-1">
+            <div className="flex items-center justify-center flex-wrap gap-2">
+              <CategoryPill
+                href="/insight"
+                icon={<LineChart className="size-3.5" />}
+                label="Analytics"
+              />
+              <CategoryPill
+                href="/planner"
+                icon={<Calendar className="size-3.5" />}
+                label="Planning"
+              />
+              <CategoryPill
+                href="/captions"
+                icon={<Quote className="size-3.5" />}
+                label="Captions"
+              />
+              <CategoryPill
+                href="/references"
+                icon={<Bookmark className="size-3.5" />}
+                label="References"
+                count={data.counts.references}
+              />
+              <CategoryPill
+                href="/inbox"
+                icon={<TrendingUp className="size-3.5" />}
+                label="Trends"
+                count={data.counts.inbox}
+              />
+            </div>
+            <div className="flex items-center justify-center">
+              <CategoryPill
+                href="/evaluate"
+                icon={<Zap className="size-3.5 text-foreground" />}
+                label="Automations"
+                count={data.counts.evaluate}
+                highlight={data.counts.evaluate > 0}
+              />
+            </div>
           </div>
         </div>
 
-        {/* 3. Main Focus Card: "Get your first post out" */}
-        <Card className="w-full rounded-lg border bg-card p-6 shadow-none">
-          <div className="space-y-6">
-            <div className="flex items-start justify-between border-b border-border/70 pb-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground font-semibold">
-                    FIRST POST
-                  </span>
-                </div>
-                <h2 className="text-xl font-bold tracking-tight text-foreground font-display">
-                  Get your first post out
-                </h2>
-                <p className="text-xs font-mono text-muted-foreground">
-                  {completedSteps} of 3 done
-                </p>
-              </div>
-              <div className="size-7 rounded-md bg-secondary flex items-center justify-center font-mono text-xs font-bold text-foreground">
-                {completedSteps}/3
-              </div>
-            </div>
-
-            <div className="space-y-5">
-              {/* Step 1: Save reference */}
-              <div className="flex items-start gap-4">
-                <div
-                  className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
-                    hasRefs
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-secondary text-secondary-foreground border border-border"
-                  }`}
-                >
-                  {hasRefs ? <CheckCircle2 className="size-3.5" /> : "1"}
-                </div>
-                <div className="flex-1 space-y-2">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">
-                      Save a reference
-                    </h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Capture high-performing reels or posts from Instagram, TikTok, or YouTube to adapt.
-                    </p>
+        {/* 3. Main Focus Card: "Get your first post out" (Matching Eksis layout) */}
+        {!focusCardDismissed && (
+          <Card className="w-full rounded-xl border bg-card p-6 shadow-none">
+            <div className="space-y-6">
+              {/* Card Header with Dismiss Button */}
+              <div className="flex items-start justify-between border-b border-border/70 pb-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <FileText className="size-3.5" />
+                    <span className="text-[10px] font-mono uppercase tracking-wider font-semibold">
+                      First post
+                    </span>
                   </div>
-                  {!hasRefs && (
-                    <Button
-                      size="sm"
-                      onClick={() => setAddLinksOpen(true)}
-                      className="h-8 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
-                    >
-                      <Plus className="size-3.5 mr-1" />
-                      <span>Add reference</span>
-                    </Button>
-                  )}
+                  <h2 className="text-xl font-bold tracking-tight text-foreground font-display">
+                    Get your first post out
+                  </h2>
+                  <p className="text-xs font-mono text-muted-foreground">
+                    {completedSteps} of 3 done
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setFocusCardDismissed(true)}
+                  className="size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary flex items-center justify-center transition-colors"
+                  aria-label="Dismiss guide"
+                >
+                  <X className="size-4" />
+                </button>
               </div>
 
-              {/* Step 2: Adapt into original content */}
-              <div className="flex items-start gap-4">
-                <div
-                  className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
-                    hasContents
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-secondary text-secondary-foreground border border-border"
-                  }`}
-                >
-                  {hasContents ? <CheckCircle2 className="size-3.5" /> : "2"}
-                </div>
-                <div className="flex-1 space-y-2">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">
-                      Write your first content draft
-                    </h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Break down hooks, audio, and visual styles to craft your own adaptation.
-                    </p>
+              {/* Step Checklist */}
+              <div className="space-y-5">
+                {/* Step 1: Connect / Add Reference */}
+                <div className="flex items-start gap-4">
+                  <div
+                    className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
+                      hasRefs
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-primary text-primary-foreground"
+                    }`}
+                  >
+                    {hasRefs ? <CheckCircle2 className="size-3.5" /> : "1"}
                   </div>
-                  {hasRefs && !hasContents && (
-                    <Link href="/contents/new">
+                  <div className="flex-1 space-y-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">
+                        Connect a channel
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Pick the account Folio collects from or capture your first reference link.
+                      </p>
+                    </div>
+                    {!hasRefs && (
                       <Button
                         size="sm"
+                        onClick={() => setAddLinksOpen(true)}
                         className="h-8 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
                       >
                         <Plus className="size-3.5 mr-1" />
-                        <span>Create content</span>
+                        <span>Connect a channel</span>
                       </Button>
-                    </Link>
-                  )}
-                </div>
-              </div>
-
-              {/* Step 3: Schedule or publish */}
-              <div className="flex items-start gap-4">
-                <div
-                  className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
-                    hasPosts
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-secondary text-secondary-foreground border border-border"
-                  }`}
-                >
-                  {hasPosts ? <CheckCircle2 className="size-3.5" /> : "3"}
-                </div>
-                <div className="flex-1 space-y-2">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">
-                      Schedule, publish & evaluate
-                    </h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Log your live post to schedule automatic checkpoints at 24h, 7d, and 30d.
-                    </p>
+                    )}
                   </div>
-                  {hasContents && !hasPosts && (
-                    <Link href="/contents">
-                      <Button
-                        size="sm"
-                        className="h-8 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
-                      >
-                        <span>Open contents</span>
-                      </Button>
-                    </Link>
-                  )}
+                </div>
+
+                {/* Step 2: Write your first post */}
+                <div className="flex items-start gap-4">
+                  <div
+                    className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
+                      hasContents
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-secondary text-secondary-foreground border border-border"
+                    }`}
+                  >
+                    {hasContents ? <CheckCircle2 className="size-3.5" /> : "2"}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">
+                        Write your first post
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Draft your script, hook breakdown, and visual style notes.
+                      </p>
+                    </div>
+                    {hasRefs && !hasContents && (
+                      <Link href="/contents/new">
+                        <Button
+                          size="sm"
+                          className="h-8 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
+                        >
+                          <Plus className="size-3.5 mr-1" />
+                          <span>Write first post</span>
+                        </Button>
+                      </Link>
+                    )}
+                  </div>
+                </div>
+
+                {/* Step 3: Schedule or publish it */}
+                <div className="flex items-start gap-4">
+                  <div
+                    className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
+                      hasPosts
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-secondary text-secondary-foreground border border-border"
+                    }`}
+                  >
+                    {hasPosts ? <CheckCircle2 className="size-3.5" /> : "3"}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">
+                        Schedule or publish it
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Schedule your content and log performance checkpoints at 24h, 7d, and 30d.
+                      </p>
+                    </div>
+                    {hasContents && !hasPosts && (
+                      <Link href="/contents">
+                        <Button
+                          size="sm"
+                          className="h-8 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
+                        >
+                          <span>Open contents</span>
+                        </Button>
+                      </Link>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        )}
 
-        {/* 4. Bottom Two-Column Grid */}
+        {/* 4. Bottom Two-Column Section (Matching Eksis layout) */}
         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Left Column: Recent References */}
-          <Card className="rounded-lg border bg-card p-4 shadow-none flex flex-col justify-between">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Bookmark className="size-4 text-foreground" />
-                  <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground">
-                    Recent References
-                  </h3>
-                </div>
-                <Link
-                  href="/references"
-                  className="text-[11px] font-mono text-muted-foreground hover:text-foreground flex items-center gap-0.5"
+          {/* Left Column: Ask Folio AI */}
+          <Card className="rounded-xl border bg-card p-5 shadow-none flex flex-col justify-between">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="size-4 text-foreground" />
+                <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground">
+                  Ask Folio AI
+                </h3>
+              </div>
+
+              <div className="space-y-2.5">
+                {/* Action 1: Find timely topics */}
+                <button
+                  type="button"
+                  onClick={() => setCommandOpen(true)}
+                  className="w-full text-left p-3 rounded-lg bg-secondary/40 hover:bg-secondary border border-border/50 transition-colors flex items-start gap-3 group"
                 >
-                  <span>View all</span>
-                  <ArrowUpRight className="size-3" />
+                  <div className="size-6 shrink-0 rounded-md bg-foreground/10 text-foreground flex items-center justify-center mt-0.5">
+                    <TrendingUp className="size-3.5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
+                      Find timely topics
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                      What is in News this week
+                    </div>
+                  </div>
+                  <ArrowRight className="size-3 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all mt-1" />
+                </button>
+
+                {/* Action 2: Plan next week */}
+                <Link
+                  href="/planner"
+                  className="block p-3 rounded-lg bg-secondary/40 hover:bg-secondary border border-border/50 transition-colors group"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="size-6 shrink-0 rounded-md bg-foreground/10 text-foreground flex items-center justify-center mt-0.5">
+                      <Calendar className="size-3.5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
+                        Plan next week
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                        A dated plan you can turn into drafts
+                      </div>
+                    </div>
+                    <ArrowRight className="size-3 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all mt-1" />
+                  </div>
                 </Link>
               </div>
-
-              {data.recentRefs.length > 0 ? (
-                <div className="space-y-2">
-                  {data.recentRefs.slice(0, 3).map((ref) => (
-                    <Link
-                      key={ref.id}
-                      href={`/references/${ref.id}`}
-                      className="block p-2 rounded-md bg-secondary/50 hover:bg-secondary border border-border/50 transition-colors"
-                    >
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-medium text-foreground truncate max-w-[200px]">
-                          {ref.summary || "Untitled Reference"}
-                        </span>
-                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-background text-muted-foreground">
-                          {ref.status}
-                        </span>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              ) : (
-                <div className="py-6 text-center space-y-2">
-                  <p className="text-xs text-muted-foreground">
-                    No references saved yet. Tap &apos;+ Add reference&apos; to paste your first link.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="pt-3 border-t border-border/50 mt-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setAddLinksOpen(true)}
-                className="w-full h-8 rounded-md text-xs font-mono uppercase tracking-wider"
-              >
-                <Plus className="size-3 mr-1" />
-                <span>Add reference</span>
-              </Button>
             </div>
           </Card>
 
-          {/* Right Column: Next Up & Checkpoints */}
-          <Card className="rounded-lg border bg-card p-4 shadow-none flex flex-col justify-between">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Clock className="size-4 text-foreground" />
-                  <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground">
-                    Next up
-                  </h3>
-                </div>
-                <Link
-                  href="/evaluate"
-                  className="text-[11px] font-mono text-muted-foreground hover:text-foreground flex items-center gap-0.5"
-                >
-                  <span>Evaluate</span>
-                  <ArrowUpRight className="size-3" />
-                </Link>
+          {/* Right Column: Next up */}
+          <Card className="rounded-xl border bg-card p-5 shadow-none flex flex-col justify-between">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Clock className="size-4 text-foreground" />
+                <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground">
+                  Next up
+                </h3>
               </div>
 
               {data.counts.evaluate > 0 ? (
-                <div className="p-3 rounded-md bg-destructive/10 border border-destructive/20 space-y-1.5">
+                <div className="p-3.5 rounded-lg bg-destructive/10 border border-destructive/20 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-destructive">
                       {data.counts.evaluate} checkpoint{data.counts.evaluate > 1 ? "s" : ""} due
                     </span>
-                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground font-bold">
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded-md bg-destructive text-destructive-foreground font-bold">
                       DUE NOW
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Record your 24h, 7d, or 30d views and retention metrics to assess performance.
                   </p>
+                  <Link href="/evaluate" className="block pt-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full h-8 rounded-md text-xs font-mono uppercase tracking-wider"
+                    >
+                      <span>Review checkpoints</span>
+                    </Button>
+                  </Link>
                 </div>
               ) : (
-                <div className="py-6 text-center space-y-2">
+                <div className="py-4 space-y-3">
                   <p className="text-xs text-muted-foreground">
-                    No scheduled posts due yet. Create and publish a post to track performance checkpoints.
+                    No scheduled posts yet. Create the first one and it shows up here.
                   </p>
+                  <Link href="/contents/new" className="block">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-md text-xs font-mono uppercase tracking-wider px-3"
+                    >
+                      <Plus className="size-3.5 mr-1" />
+                      <span>Create post</span>
+                    </Button>
+                  </Link>
                 </div>
               )}
-            </div>
-
-            <div className="pt-3 border-t border-border/50 mt-3">
-              <Link href="/contents/new" className="w-full block">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full h-8 rounded-md text-xs font-mono uppercase tracking-wider"
-                >
-                  <Plus className="size-3 mr-1" />
-                  <span>Create content</span>
-                </Button>
-              </Link>
             </div>
           </Card>
         </div>
@@ -403,7 +434,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
   );
 }
 
-function PillButton({
+function CategoryPill({
   href,
   icon,
   label,
@@ -419,7 +450,7 @@ function PillButton({
   return (
     <Link
       href={href}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-border bg-background hover:bg-secondary text-foreground/80 hover:text-foreground transition-all shadow-none ${
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-border bg-card hover:bg-secondary text-foreground/80 hover:text-foreground transition-all shadow-none ${
         highlight ? "border-destructive/40 text-destructive" : ""
       }`}
     >
@@ -427,7 +458,7 @@ function PillButton({
       <span>{label}</span>
       {typeof count === "number" && count > 0 && (
         <span
-          className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+          className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${
             highlight
               ? "bg-destructive text-destructive-foreground font-bold"
               : "bg-secondary text-secondary-foreground"

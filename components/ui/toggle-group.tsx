@@ -27,7 +27,7 @@ function ToggleGroup({
       data-variant={variant}
       data-size={size}
       className={cn(
-        "group/toggle-group flex w-fit items-center gap-2 rounded-full",
+        "group/toggle-group flex w-fit items-center gap-2 rounded-control",
         className
       )}
       {...props}
@@ -58,7 +58,7 @@ function ToggleGroupItem({
           variant: context.variant || variant,
           size: context.size || size,
         }),
-        "shrink-0 rounded-full focus:z-10 focus-visible:z-10",
+        "shrink-0 rounded-control focus:z-10 focus-visible:z-10",
         className
       )}
       {...props}
