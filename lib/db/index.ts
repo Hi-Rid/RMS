@@ -11,9 +11,11 @@ const g = globalThis as unknown as { pg?: ReturnType<typeof postgres> };
 function createClient() {
   return postgres(connectionString, {
     prepare: false, // PgBouncer transaction pooler requirement
-    max: 5,
-    idle_timeout: 10,
-    connect_timeout: 5,
+    max: 10,
+    idle_timeout: 15,
+    connect_timeout: 4,
+    queue_timeout: 3, // Max 3s waiting in pool queue
+    query_timeout: 4, // Max 4s running any query
     onnotice: () => {},
   });
 }

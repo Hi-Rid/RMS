@@ -7,8 +7,10 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const owner = await requirePageOwner();
-  const counts = await getSidebarCounts();
+  const [owner, counts] = await Promise.all([
+    requirePageOwner(),
+    getSidebarCounts(),
+  ]);
 
   return (
     <AppShell counts={counts} ownerEmail={owner.email}>
