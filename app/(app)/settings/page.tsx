@@ -22,16 +22,16 @@ export default async function SettingsPage() {
       </div>
 
       <Tabs defaultValue="ingest" className="w-full space-y-6">
-        <TabsList className="bg-secondary rounded-md p-1 border border-border">
-          <TabsTrigger value="ingest" className="rounded-md text-xs font-mono uppercase tracking-wider">
+        <TabsList>
+          <TabsTrigger value="ingest">
             <Key className="size-3.5 mr-1.5" />
             <span>Ingest & Shortcuts</span>
           </TabsTrigger>
-          <TabsTrigger value="master" className="rounded-md text-xs font-mono uppercase tracking-wider">
+          <TabsTrigger value="master">
             <Database className="size-3.5 mr-1.5" />
             <span>Master Data</span>
           </TabsTrigger>
-          <TabsTrigger value="ai" className="rounded-md text-xs font-mono uppercase tracking-wider">
+          <TabsTrigger value="ai">
             <Cpu className="size-3.5 mr-1.5" />
             <span>AI Configuration</span>
           </TabsTrigger>
