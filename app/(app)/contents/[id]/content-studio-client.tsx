@@ -31,6 +31,8 @@ import {
   Star,
   Link as LinkIcon,
   Unlink,
+  FileText,
+  Sparkles,
 } from "lucide-react";
 import {
   updateContent,
@@ -40,6 +42,7 @@ import {
   unlinkReferenceFromContent,
 } from "@/lib/actions/contents";
 import { addPost, deletePost } from "@/lib/actions/posts";
+import { aiGenerateHooks, aiDraftScript, type GeneratedHook } from "@/lib/actions/ai";
 import { toast } from "sonner";
 import type { ContentDetailItem } from "@/lib/queries/contents";
 import type { MasterData } from "@/lib/queries/references";
@@ -74,6 +77,64 @@ export function ContentStudioClient({
 
   // Final rating state
   const [rating, setRating] = useState<number | null>(content.finalRating);
+
+  // AI Assistant states
+  const [isGeneratingHooks, setIsGeneratingHooks] = useState(false);
+  const [isDraftingScript, setIsDraftingScript] = useState(false);
+  const [hookOptions, setHookOptions] = useState<GeneratedHook[]>([]);
+  const [isHooksModalOpen, setIsHooksModalOpen] = useState(false);
+
+  const handleGenerateHooks = async () => {
+    setIsGeneratingHooks(true);
+    try {
+      const res = await aiGenerateHooks({
+        topic: title,
+        pillar: content.pillars[0]?.name,
+        format: content.format?.name,
+      });
+
+      if (!res.ok) {
+        toast.error(res.error.message);
+        return;
+      }
+
+      setHookOptions(res.data.hooks);
+      setIsHooksModalOpen(true);
+    } catch {
+      toast.error("Failed to generate hooks");
+    } finally {
+      setIsGeneratingHooks(false);
+    }
+  };
+
+  const handleApplyHook = (hook: GeneratedHook) => {
+    setHookText(hook.text);
+    setIsHooksModalOpen(false);
+    toast.success(`Selected hook: "${hook.text}"`);
+  };
+
+  const handleDraftScript = async () => {
+    setIsDraftingScript(true);
+    try {
+      const res = await aiDraftScript({
+        title,
+        hookText,
+        notes,
+      });
+
+      if (!res.ok) {
+        toast.error(res.error.message);
+        return;
+      }
+
+      setNotes(res.data.script);
+      toast.success("AI Script drafted! Check the editor below.");
+    } catch {
+      toast.error("Failed to draft script");
+    } finally {
+      setIsDraftingScript(false);
+    }
+  };
 
   const handleSaveDetails = () => {
     startTransition(async () => {
@@ -296,19 +357,55 @@ export function ContentStudioClient({
         <div className="lg:col-span-2 space-y-6">
           {/* Script Editor Card */}
           <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-border/60 pb-3">
-              <h2 className="text-sm font-black font-display tracking-tight text-foreground">
-                Script & Production Notes
+            <div className="flex items-center justify-between border-b border-border/60 pb-3 flex-wrap gap-2">
+              <h2 className="text-sm font-black font-display tracking-tight text-foreground flex items-center gap-1.5">
+                <FileText className="size-4" />
+                <span>Script & Production Notes</span>
               </h2>
-              <Button
-                size="sm"
-                onClick={handleSaveDetails}
-                disabled={isPending}
-                className="text-xs font-mono h-7 bg-foreground text-background font-bold gap-1"
-              >
-                {isPending ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
-                <span>Save</span>
-              </Button>
+
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGenerateHooks}
+                  disabled={isGeneratingHooks}
+                  className="text-xs font-mono h-7 gap-1 border-border/80 hover:bg-secondary text-foreground"
+                >
+                  {isGeneratingHooks ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-3 text-amber-500 fill-amber-500" />
+                  )}
+                  <span>AI Hooks</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDraftScript}
+                  disabled={isDraftingScript}
+                  className="text-xs font-mono h-7 gap-1 border-border/80 hover:bg-secondary text-foreground"
+                >
+                  {isDraftingScript ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-3 text-amber-500 fill-amber-500" />
+                  )}
+                  <span>Draft Script</span>
+                </Button>
+
+                <Button
+                  size="sm"
+                  onClick={handleSaveDetails}
+                  disabled={isPending}
+                  className="text-xs font-mono h-7 bg-foreground text-background font-bold gap-1"
+                >
+                  {isPending ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
+                  <span>Save</span>
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-4">
@@ -684,6 +781,45 @@ export function ContentStudioClient({
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      {/* Hook Picker Dialog */}
+      <Dialog open={isHooksModalOpen} onOpenChange={setIsHooksModalOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black font-display tracking-tight flex items-center gap-2">
+              <Sparkles className="size-4 text-amber-500 fill-amber-500" />
+              <span>AI Viral Hook Suggestions</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs font-mono text-muted-foreground">
+              Select any generated hook to apply directly to your content.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto">
+            {hookOptions.map((hook, idx) => (
+              <div
+                key={idx}
+                onClick={() => handleApplyHook(hook)}
+                className="p-3 rounded-lg border border-border bg-secondary/30 hover:border-foreground/60 hover:bg-secondary/70 cursor-pointer transition-all space-y-1.5 group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-foreground text-background">
+                    {hook.archetype}
+                  </span>
+                  <span className="text-[11px] font-mono text-muted-foreground group-hover:text-foreground">
+                    Click to apply →
+                  </span>
+                </div>
+                <p className="text-xs font-mono font-medium text-foreground">
+                  "{hook.text}"
+                </p>
+                <p className="text-[10px] font-mono text-muted-foreground">
+                  💡 {hook.whyItWorks}
+                </p>
+              </div>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import { sql, eq, and, isNull } from "drizzle-orm";
+import { sql, eq, and, isNull, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   refs,
@@ -13,6 +13,7 @@ import {
   refPillars,
   posts,
   appSettings,
+  formats,
 } from "@/db/schema";
 
 export type SidebarCounts = {
@@ -178,17 +179,25 @@ export type HomeData = {
     status: string;
     savedAt: string;
   }[];
+  activeContents: {
+    id: string;
+    title: string;
+    formatName: string | null;
+    checklistTotal: number;
+    checklistDone: number;
+  }[];
 };
 
 const defaultHomeData: HomeData = {
   counts: defaultCounts,
   weeklyTarget: { target: 3, posted: 0 },
   recentRefs: [],
+  activeContents: [],
 };
 
 export const getHomeData = cache(async (): Promise<HomeData> => {
   try {
-    const [counts, settingsQuery, weeklyPostsRes, recentRefsQuery] = await Promise.all([
+    const [counts, settingsQuery, weeklyPostsRes, recentRefsQuery, activeContentsQuery] = await Promise.all([
       getSidebarCounts(),
       db
         .select({ weeklyPostTarget: appSettings.weeklyPostTarget })
@@ -215,6 +224,18 @@ export const getHomeData = cache(async (): Promise<HomeData> => {
         .orderBy(sql`${refs.savedAt} desc`)
         .limit(6)
         .catch(() => []),
+      db
+        .select({
+          id: contents.id,
+          title: contents.title,
+          formatName: formats.name,
+        })
+        .from(contents)
+        .leftJoin(formats, eq(contents.formatId, formats.id))
+        .where(and(eq(contents.status, "production"), isNull(contents.archivedAt)))
+        .orderBy(desc(contents.updatedAt))
+        .limit(4)
+        .catch(() => []),
     ]);
 
     const weeklyTarget = settingsQuery?.[0]?.weeklyPostTarget ?? 3;
@@ -232,6 +253,13 @@ export const getHomeData = cache(async (): Promise<HomeData> => {
         summary: r.summary,
         status: r.status,
         savedAt: r.savedAt ? String(r.savedAt) : new Date().toISOString(),
+      })),
+      activeContents: (activeContentsQuery || []).map((c) => ({
+        id: c.id,
+        title: c.title,
+        formatName: c.formatName,
+        checklistTotal: 5,
+        checklistDone: 2,
       })),
     };
   } catch (err) {

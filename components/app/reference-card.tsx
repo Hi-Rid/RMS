@@ -32,6 +32,21 @@ interface ReferenceCardProps {
   showTriageActions?: boolean;
 }
 
+function getPlatformStyle(slug: string) {
+  switch (slug.toLowerCase()) {
+    case "instagram":
+      return "bg-pink-500/10 text-pink-700 dark:text-pink-400 border-pink-500/30";
+    case "tiktok":
+      return "bg-cyan-500/10 text-cyan-800 dark:text-cyan-400 border-cyan-500/30";
+    case "youtube":
+      return "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30";
+    case "threads":
+      return "bg-foreground text-background border-foreground";
+    default:
+      return "bg-secondary text-secondary-foreground border-border";
+  }
+}
+
 export function ReferenceCard({
   reference,
   masterData,
@@ -95,7 +110,7 @@ export function ReferenceCard({
           {/* Top Row: Platform, Format & Status */}
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[11px] font-mono uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground border border-border">
+              <span className={`text-[11px] font-mono uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${getPlatformStyle(reference.platform.slug)}`}>
                 {reference.platform.name}
               </span>
               {reference.format && (

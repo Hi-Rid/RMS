@@ -28,7 +28,9 @@ import {
   deleteReferencePermanently,
   setReferenceStatus,
 } from "@/lib/actions/references";
+import { aiBedahReference } from "@/lib/actions/ai";
 import { toast } from "sonner";
+import { Sparkles } from "lucide-react";
 import type { ReferenceListItem, MasterData } from "@/lib/queries/references";
 
 interface ReferenceDetailClientProps {
@@ -53,6 +55,37 @@ export function ReferenceDetailClient({
 
   // Active tab: "capture" | "bedah"
   const [tab, setTab] = useState<"capture" | "bedah">("capture");
+  const [isAiLoading, setIsAiLoading] = useState(false);
+
+  const handleAiBedah = async () => {
+    setIsAiLoading(true);
+    try {
+      const res = await aiBedahReference({
+        text: hookText || reference.summary || reference.url,
+        platform: reference.platform.name,
+      });
+
+      if (!res.ok) {
+        toast.error(res.error.message);
+        return;
+      }
+
+      setHookText(res.data.hookText);
+      setVisualNotes(res.data.visualNotes);
+      setNotes(
+        (prev) =>
+          `${prev ? prev + "\n\n" : ""}Key Takeaway: ${res.data.keyTakeaway}\n\nAdaptation Ideas:\n- ${res.data.adaptIdeas.join("\n- ")}`
+      );
+      if (res.data.suggestedTags?.length) {
+        setTagsInput(res.data.suggestedTags.join(", "));
+      }
+      toast.success("AI Bedah completed! Extracted hook and adaptation ideas.");
+    } catch {
+      toast.error("Failed to run AI Bedah");
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
 
   // Capture Form State
   const [selectedPillars, setSelectedPillars] = useState<string[]>(
@@ -479,6 +512,33 @@ export function ReferenceDetailClient({
       {/* Tab 2: Bedah Breakdown */}
       {tab === "bedah" && (
         <div className="bg-card border border-border rounded-lg p-6 space-y-6">
+          {/* AI Bedah Banner */}
+          <div className="p-4 rounded-lg border border-border bg-secondary/40 flex items-center justify-between gap-3 flex-wrap">
+            <div className="space-y-0.5">
+              <span className="font-bold text-foreground font-display flex items-center gap-1.5 text-xs">
+                <Sparkles className="size-3.5 text-amber-500 fill-amber-500" />
+                <span>AI Auto-Bedah (Gemini Pro / Flash)</span>
+              </span>
+              <p className="text-[11px] font-mono text-muted-foreground">
+                Ekstrak hook pembuka, visual structure & ide adaptasi orisinal secara otomatis
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              disabled={isAiLoading}
+              onClick={handleAiBedah}
+              className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5"
+            >
+              {isAiLoading ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Sparkles className="size-3" />
+              )}
+              <span>Jalankan Auto-Bedah</span>
+            </Button>
+          </div>
+
           <div className="space-y-4">
             {/* Elements Checkboxes */}
             <div className="space-y-2">

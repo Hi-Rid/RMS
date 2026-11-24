@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { saveCapture } from "@/lib/actions/references";
+import { aiBedahReference } from "@/lib/actions/ai";
 import { toast } from "sonner";
 import { Loader2, ExternalLink, Sparkles } from "lucide-react";
 import type { ReferenceListItem, MasterData } from "@/lib/queries/references";
@@ -47,6 +48,38 @@ export function CaptureSheet({
   const [visualNotes, setVisualNotes] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [tagsInput, setTagsInput] = useState<string>("");
+  const [isAiLoading, setIsAiLoading] = useState(false);
+
+  const handleAiBedah = async () => {
+    if (!reference) return;
+    setIsAiLoading(true);
+    try {
+      const res = await aiBedahReference({
+        text: hookText || reference.summary || reference.url,
+        platform: reference.platform.name,
+      });
+
+      if (!res.ok) {
+        toast.error(res.error.message);
+        return;
+      }
+
+      setHookText(res.data.hookText);
+      setVisualNotes(res.data.visualNotes);
+      setNotes(
+        (prev) =>
+          `${prev ? prev + "\n\n" : ""}Key Insight: ${res.data.keyTakeaway}\n\nAdaptation Ideas:\n- ${res.data.adaptIdeas.join("\n- ")}`
+      );
+      if (res.data.suggestedTags?.length) {
+        setTagsInput(res.data.suggestedTags.join(", "));
+      }
+      toast.success("AI Bedah complete! Extracted hook & adaptation ideas.");
+    } catch {
+      toast.error("Failed to run AI Bedah");
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
 
   // Sync state when reference opens
   React.useEffect(() => {
@@ -126,6 +159,33 @@ export function CaptureSheet({
         </SheetHeader>
 
         <div className="space-y-5 text-xs">
+          {/* AI Bedah Quick Button */}
+          <div className="p-3 rounded-lg border border-border bg-secondary/40 flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <span className="font-bold text-foreground font-display flex items-center gap-1.5 text-xs">
+                <Sparkles className="size-3.5 text-amber-500 fill-amber-500" />
+                <span>AI Auto-Bedah (Gemini)</span>
+              </span>
+              <p className="text-[11px] font-mono text-muted-foreground">
+                Ekstrak hook, visual structure & ide adaptasi otomatis
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              disabled={isAiLoading}
+              onClick={handleAiBedah}
+              className="text-xs font-mono h-7 bg-foreground text-background font-bold gap-1 shrink-0"
+            >
+              {isAiLoading ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Sparkles className="size-3" />
+              )}
+              <span>Auto-Bedah</span>
+            </Button>
+          </div>
+
           {/* Content Pillars */}
           <div className="space-y-2">
             <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">

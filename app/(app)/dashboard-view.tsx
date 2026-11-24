@@ -1,38 +1,37 @@
 "use client";
 
 import * as React from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowRight,
-  ArrowUpRight,
   Bookmark,
   Calendar,
   CheckCircle2,
   CheckSquare,
   Clock,
-  Compass,
-  CornerDownLeft,
+  ExternalLink,
+  FilePlus,
   FileText,
-  Globe,
+  FileVideo,
   Inbox,
   Layers,
   LineChart,
-  Lock,
-  MessageSquare,
-  Music,
+  Link as LinkIcon,
+  Loader2,
+  Play,
   Plus,
-  Quote,
-  Search,
   Send,
   Sparkles,
-  TrendingUp,
-  X,
+  Trophy,
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { CommandPalette } from "@/components/app/command-palette";
-import { AddLinksDialog } from "@/components/app/add-links-dialog";
+import { Input } from "@/components/ui/input";
+import { StatusBadge } from "@/components/app/status-badge";
+import { createReferenceFromUrl } from "@/lib/actions/references";
+import { toast } from "sonner";
 import type { HomeData } from "@/lib/queries/home";
 
 interface DashboardViewProps {
@@ -41,432 +40,408 @@ interface DashboardViewProps {
 }
 
 export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
-  const [commandOpen, setCommandOpen] = React.useState(false);
-  const [addLinksOpen, setAddLinksOpen] = React.useState(false);
-  const [focusCardDismissed, setFocusCardDismissed] = React.useState(false);
-  const [queryInput, setQueryInput] = React.useState("");
+  const router = useRouter();
+  const [quickUrl, setQuickUrl] = useState("");
+  const [isIngesting, startIngest] = useTransition();
 
-  // Compute completed steps
-  const hasRefs = data.counts.references > 0;
-  const hasContents = data.counts.contents > 0;
-  const hasPosts = data.weeklyTarget.posted > 0;
-  const completedSteps = (hasRefs ? 1 : 0) + (hasContents ? 1 : 0) + (hasPosts ? 1 : 0);
-
-  // User display name from email (e.g. "Elise" from "elise@domain.com")
   const displayName = React.useMemo(() => {
-    if (!ownerEmail) return "Elise";
+    if (!ownerEmail) return "Creator";
     const localPart = ownerEmail.split("@")[0];
     return localPart.charAt(0).toUpperCase() + localPart.slice(1);
   }, [ownerEmail]);
 
-  const handleSearchSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setCommandOpen(true);
+  const handleQuickIngest = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickUrl.trim()) {
+      toast.error("Please enter or paste a valid link");
+      return;
+    }
+
+    startIngest(async () => {
+      const res = await createReferenceFromUrl({ input: quickUrl.trim() });
+      if (res.ok) {
+        if (res.data.status === "duplicate") {
+          toast.info("Reference already saved in your database");
+        } else {
+          toast.success("Link saved to Inbox! Ready to triage.");
+        }
+        setQuickUrl("");
+        router.refresh();
+      } else {
+        toast.error(res.error.message);
+      }
+    });
   };
 
+  const weeklyPct = Math.min(
+    100,
+    Math.round((data.weeklyTarget.posted / Math.max(1, data.weeklyTarget.target)) * 100)
+  );
+
   return (
-    <div className="relative min-h-full w-full py-10 px-4 sm:px-8 flex flex-col items-center">
-      {/* Subtle fine dot/grid pattern background matching editorial style */}
+    <div className="relative min-h-full w-full py-8 px-4 sm:px-8 space-y-8 max-w-6xl mx-auto">
+      {/* Background blueprint grid */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-[0.35]"
+        className="pointer-events-none absolute inset-0 opacity-[0.25]"
         style={{
           backgroundImage: `radial-gradient(var(--border) 1px, transparent 1px)`,
           backgroundSize: "24px 24px",
         }}
       />
 
-      <div className="relative w-full max-w-2xl flex flex-col items-center space-y-8">
-        {/* 1. Centered Hero Header */}
-        <div className="flex flex-col items-center text-center space-y-3">
-          <div className="size-11 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-display font-black text-xl shadow-none">
-            R
+      {/* 1. Header & Instant Quick Ingest */}
+      <div className="relative space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border/80 pb-5">
+          <div className="flex items-center gap-3">
+            <div className="size-10 rounded-md bg-foreground text-background flex items-center justify-center font-display font-black text-lg">
+              R
+            </div>
+            <div>
+              <h1 className="text-xl sm:text-2xl font-black font-display tracking-tight text-foreground">
+                Hi, {displayName}
+              </h1>
+              <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                RMS Creator Command Center
+              </p>
+            </div>
           </div>
-          <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-foreground font-display">
-            Hi, {displayName}
-          </h1>
-          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            What will you create today?
-          </p>
+
+          <div className="flex items-center gap-2">
+            <Link href="/contents/new">
+              <Button size="sm" className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5">
+                <Plus className="size-3.5" />
+                <span>New Content</span>
+              </Button>
+            </Link>
+          </div>
         </div>
 
-        {/* 2. Central Prompt / Command Box (Eksis Layout Twin) */}
-        <div className="w-full space-y-3">
-          <div
-            onClick={() => setCommandOpen(true)}
-            className="w-full rounded-xl bg-card border border-border p-3.5 sm:p-4 cursor-pointer hover:border-foreground/30 transition-all shadow-none group"
+        {/* Quick Paste Bar */}
+        <form
+          onSubmit={handleQuickIngest}
+          className="relative flex items-center bg-card border border-border/80 rounded-lg p-1.5 shadow-none transition-all focus-within:border-foreground/50 hover:border-foreground/30"
+        >
+          <div className="pl-3 pr-2 text-muted-foreground">
+            <LinkIcon className="size-4" />
+          </div>
+          <Input
+            value={quickUrl}
+            onChange={(e) => setQuickUrl(e.target.value)}
+            placeholder="Paste any Reels, TikTok, or YouTube link to instantly ingest to Inbox..."
+            className="border-0 bg-transparent h-9 text-xs font-mono focus-visible:ring-0 focus-visible:ring-offset-0 px-1"
+            disabled={isIngesting}
+          />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={isIngesting || !quickUrl.trim()}
+            className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5 shrink-0 px-3.5"
           >
-            {/* Top Text / Prompt Line */}
-            <div className="flex items-start justify-between min-h-[44px]">
-              <span className="text-xs sm:text-sm text-muted-foreground group-hover:text-foreground transition-colors select-none font-sans">
-                Ask about your channels, posts, or what to post next
-              </span>
-            </div>
+            {isIngesting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Zap className="size-3.5 fill-current" />
+            )}
+            <span>Ingest</span>
+          </Button>
+        </form>
+      </div>
 
-            {/* Bottom Controls Bar inside the box */}
-            <div className="flex items-center justify-between pt-3 border-t border-border/40">
-              <div className="flex items-center gap-2">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider bg-secondary text-secondary-foreground border border-border/60">
-                  <Globe className="size-3 text-muted-foreground" />
-                  <span>Search the web</span>
-                </div>
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider bg-secondary/60 text-muted-foreground border border-border/40">
-                  <Zap className="size-3" />
-                  <span>Off</span>
-                  <Lock className="size-2.5" />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded-md bg-secondary text-secondary-foreground border border-border hidden sm:inline-block">
-                  ⌘K
-                </kbd>
-                <div className="size-7 rounded-md bg-primary text-primary-foreground flex items-center justify-center">
-                  <Send className="size-3.5 -rotate-45" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick Action Category Buttons row (Matching Eksis layout) */}
-          <div className="flex flex-col items-center gap-2 pt-1">
-            <div className="flex items-center justify-center flex-wrap gap-2">
-              <CategoryPill
-                href="/insight"
-                icon={<LineChart className="size-3.5" />}
-                label="Analytics"
-              />
-              <CategoryPill
-                href="/planner"
-                icon={<Calendar className="size-3.5" />}
-                label="Planning"
-              />
-              <CategoryPill
-                href="/captions"
-                icon={<Quote className="size-3.5" />}
-                label="Captions"
-              />
-              <CategoryPill
-                href="/references"
-                icon={<Bookmark className="size-3.5" />}
-                label="References"
-                count={data.counts.references}
-              />
-              <CategoryPill
-                href="/inbox"
-                icon={<TrendingUp className="size-3.5" />}
-                label="Trends"
-                count={data.counts.inbox}
-              />
-            </div>
-            <div className="flex items-center justify-center">
-              <CategoryPill
-                href="/evaluate"
-                icon={<Zap className="size-3.5 text-foreground" />}
-                label="Automations"
-                count={data.counts.evaluate}
-                highlight={data.counts.evaluate > 0}
-              />
-            </div>
-          </div>
+      {/* 2. Visual 4-Stage Pipeline Roadmap */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Layers className="size-3.5" />
+            <span>Content Pipeline Status</span>
+          </h2>
+          <span className="text-[11px] font-mono text-muted-foreground">
+            Weekly Goal: {data.weeklyTarget.posted}/{data.weeklyTarget.target} posted ({weeklyPct}%)
+          </span>
         </div>
 
-        {/* 3. Main Focus Card: "Get your first post out" (Matching Eksis layout) */}
-        {!focusCardDismissed && (
-          <Card className="w-full rounded-xl border bg-card p-6 shadow-none">
-            <div className="space-y-6">
-              {/* Card Header with Dismiss Button */}
-              <div className="flex items-start justify-between border-b border-border/70 pb-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <FileText className="size-3.5" />
-                    <span className="text-[10px] font-mono uppercase tracking-wider font-semibold">
-                      First post
-                    </span>
-                  </div>
-                  <h2 className="text-xl font-bold tracking-tight text-foreground font-display">
-                    Get your first post out
-                  </h2>
-                  <p className="text-xs font-mono text-muted-foreground">
-                    {completedSteps} of 3 done
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setFocusCardDismissed(true)}
-                  className="size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary flex items-center justify-center transition-colors"
-                  aria-label="Dismiss guide"
-                >
-                  <X className="size-4" />
-                </button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Stage 1: INBOX */}
+          <div className="bg-card border border-border rounded-lg p-5 space-y-3 flex flex-col justify-between hover:border-foreground/30 transition-colors">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-muted/60 text-muted-foreground border border-border/60">
+                  Step 01
+                </span>
+                <Inbox className="size-4 text-muted-foreground" />
               </div>
-
-              {/* Step Checklist */}
-              <div className="space-y-5">
-                {/* Step 1: Connect / Add Reference */}
-                <div className="flex items-start gap-4">
-                  <div
-                    className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
-                      hasRefs
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-primary text-primary-foreground"
-                    }`}
-                  >
-                    {hasRefs ? <CheckCircle2 className="size-3.5" /> : "1"}
-                  </div>
-                  <div className="flex-1 space-y-2">
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">
-                        Connect a channel
-                      </h3>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Pick the account RMS collects from or capture your first reference link.
-                      </p>
-                    </div>
-                    {!hasRefs && (
-                      <Button
-                        size="sm"
-                        onClick={() => setAddLinksOpen(true)}
-                        className="h-8 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
-                      >
-                        <Plus className="size-3.5 mr-1" />
-                        <span>Connect a channel</span>
-                      </Button>
-                    )}
-                  </div>
+              <div>
+                <div className="text-2xl font-black font-display tracking-tight text-foreground">
+                  {data.counts.inbox}
                 </div>
-
-                {/* Step 2: Write your first post */}
-                <div className="flex items-start gap-4">
-                  <div
-                    className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
-                      hasContents
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-secondary text-secondary-foreground border border-border"
-                    }`}
-                  >
-                    {hasContents ? <CheckCircle2 className="size-3.5" /> : "2"}
-                  </div>
-                  <div className="flex-1 space-y-2">
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">
-                        Write your first post
-                      </h3>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Draft your script, hook breakdown, and visual style notes.
-                      </p>
-                    </div>
-                    {hasRefs && !hasContents && (
-                      <Link href="/contents/new">
-                        <Button
-                          size="sm"
-                          className="h-8 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
-                        >
-                          <Plus className="size-3.5 mr-1" />
-                          <span>Write first post</span>
-                        </Button>
-                      </Link>
-                    )}
-                  </div>
+                <div className="text-xs font-mono font-medium text-foreground">
+                  Inbox Triage
                 </div>
-
-                {/* Step 3: Schedule or publish it */}
-                <div className="flex items-start gap-4">
-                  <div
-                    className={`size-6 shrink-0 rounded-md flex items-center justify-center font-mono text-xs font-bold ${
-                      hasPosts
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-secondary text-secondary-foreground border border-border"
-                    }`}
-                  >
-                    {hasPosts ? <CheckCircle2 className="size-3.5" /> : "3"}
-                  </div>
-                  <div className="flex-1 space-y-2">
-                    <div>
-                      <h3 className="text-sm font-semibold text-foreground">
-                        Schedule or publish it
-                      </h3>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Schedule your content and log performance checkpoints at 24h, 7d, and 30d.
-                      </p>
-                    </div>
-                    {hasContents && !hasPosts && (
-                      <Link href="/contents">
-                        <Button
-                          size="sm"
-                          className="h-8 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider px-3"
-                        >
-                          <span>Open contents</span>
-                        </Button>
-                      </Link>
-                    )}
-                  </div>
-                </div>
+                <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                  Raw saved links waiting for review & bedah
+                </p>
               </div>
             </div>
-          </Card>
-        )}
 
-        {/* 4. Bottom Two-Column Section (Matching Eksis layout) */}
-        <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Left Column: Ask RMS AI */}
-          <Card className="rounded-xl border bg-card p-5 shadow-none flex flex-col justify-between">
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Sparkles className="size-4 text-foreground" />
-                <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground">
-                  Ask RMS AI
-                </h3>
+            <div className="pt-2">
+              <Link href={data.counts.inbox > 0 ? "/inbox/triage" : "/inbox"}>
+                <Button
+                  size="sm"
+                  className="w-full text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5"
+                >
+                  <Play className="size-3 fill-current" />
+                  <span>{data.counts.inbox > 0 ? "Start Triage" : "Open Inbox"}</span>
+                </Button>
+              </Link>
+            </div>
+          </div>
+
+          {/* Stage 2: CURATED REFERENCES */}
+          <div className="bg-card border border-border rounded-lg p-5 space-y-3 flex flex-col justify-between hover:border-foreground/30 transition-colors">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                  Step 02
+                </span>
+                <Bookmark className="size-4 text-amber-600 dark:text-amber-400" />
               </div>
-
-              <div className="space-y-2.5">
-                {/* Action 1: Find timely topics */}
-                <button
-                  type="button"
-                  onClick={() => setCommandOpen(true)}
-                  className="w-full text-left p-3 rounded-lg bg-secondary/40 hover:bg-secondary border border-border/50 transition-colors flex items-start gap-3 group"
-                >
-                  <div className="size-6 shrink-0 rounded-md bg-foreground/10 text-foreground flex items-center justify-center mt-0.5">
-                    <TrendingUp className="size-3.5" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
-                      Find timely topics
-                    </div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5">
-                      What is in News this week
-                    </div>
-                  </div>
-                  <ArrowRight className="size-3 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all mt-1" />
-                </button>
-
-                {/* Action 2: Plan next week */}
-                <Link
-                  href="/planner"
-                  className="block p-3 rounded-lg bg-secondary/40 hover:bg-secondary border border-border/50 transition-colors group"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="size-6 shrink-0 rounded-md bg-foreground/10 text-foreground flex items-center justify-center mt-0.5">
-                      <Calendar className="size-3.5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
-                        Plan next week
-                      </div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5">
-                        A dated plan you can turn into drafts
-                      </div>
-                    </div>
-                    <ArrowRight className="size-3 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all mt-1" />
-                  </div>
-                </Link>
+              <div>
+                <div className="text-2xl font-black font-display tracking-tight text-foreground">
+                  {data.counts.statuses.selected}
+                </div>
+                <div className="text-xs font-mono font-medium text-foreground">
+                  Selected Inspiration
+                </div>
+                <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                  Validated ideas ready to be adapted into content
+                </p>
               </div>
             </div>
-          </Card>
 
-          {/* Right Column: Next up */}
-          <Card className="rounded-xl border bg-card p-5 shadow-none flex flex-col justify-between">
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Clock className="size-4 text-foreground" />
-                <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground">
-                  Next up
-                </h3>
-              </div>
-
-              {data.counts.evaluate > 0 ? (
-                <div className="p-3.5 rounded-lg bg-destructive/10 border border-destructive/20 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-destructive">
-                      {data.counts.evaluate} checkpoint{data.counts.evaluate > 1 ? "s" : ""} due
-                    </span>
-                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded-md bg-destructive text-destructive-foreground font-bold">
-                      DUE NOW
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Record your 24h, 7d, or 30d views and retention metrics to assess performance.
-                  </p>
-                  <Link href="/evaluate" className="block pt-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full h-8 rounded-md text-xs font-mono uppercase tracking-wider"
-                    >
-                      <span>Review checkpoints</span>
-                    </Button>
-                  </Link>
-                </div>
-              ) : (
-                <div className="py-4 space-y-3">
-                  <p className="text-xs text-muted-foreground">
-                    No scheduled posts yet. Create the first one and it shows up here.
-                  </p>
-                  <Link href="/contents/new" className="block">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 rounded-md text-xs font-mono uppercase tracking-wider px-3"
-                    >
-                      <Plus className="size-3.5 mr-1" />
-                      <span>Create post</span>
-                    </Button>
-                  </Link>
-                </div>
-              )}
+            <div className="pt-2">
+              <Link href="/contents/new">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full text-xs font-mono h-8 font-bold border-border hover:bg-secondary text-foreground gap-1.5"
+                >
+                  <Plus className="size-3" />
+                  <span>Draft Content</span>
+                </Button>
+              </Link>
             </div>
-          </Card>
+          </div>
+
+          {/* Stage 3: PRODUCTION STUDIO */}
+          <div className="bg-card border border-border rounded-lg p-5 space-y-3 flex flex-col justify-between hover:border-foreground/30 transition-colors">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/30">
+                  Step 03
+                </span>
+                <FileVideo className="size-4 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <div className="text-2xl font-black font-display tracking-tight text-foreground">
+                  {data.counts.statuses.production}
+                </div>
+                <div className="text-xs font-mono font-medium text-foreground">
+                  In Production
+                </div>
+                <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                  Scripts being written, filmed, and edited
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <Link href="/contents">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full text-xs font-mono h-8 font-bold border-border hover:bg-secondary text-foreground gap-1.5"
+                >
+                  <Layers className="size-3" />
+                  <span>Open Studio</span>
+                </Button>
+              </Link>
+            </div>
+          </div>
+
+          {/* Stage 4: EVALUATION & CHECKPOINTS */}
+          <div className="bg-card border border-border rounded-lg p-5 space-y-3 flex flex-col justify-between hover:border-foreground/30 transition-colors">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-500/30">
+                  Step 04
+                </span>
+                <CheckSquare className="size-4 text-purple-600 dark:text-purple-400" />
+              </div>
+              <div>
+                <div className="text-2xl font-black font-display tracking-tight text-foreground">
+                  {data.counts.evaluate}
+                </div>
+                <div className="text-xs font-mono font-medium text-foreground">
+                  Checkpoints Due
+                </div>
+                <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                  24h, 7d, 30d views & retention reviews
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <Link href="/evaluate">
+                <Button
+                  size="sm"
+                  className={`w-full text-xs font-mono h-8 font-bold gap-1.5 ${
+                    data.counts.evaluate > 0
+                      ? "bg-foreground text-background font-black"
+                      : "bg-secondary text-muted-foreground border border-border"
+                  }`}
+                >
+                  <BarChart3 className="size-3" />
+                  <span>{data.counts.evaluate > 0 ? "Review Now" : "View Tracker"}</span>
+                </Button>
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Command Palette Modal */}
-      <CommandPalette
-        open={commandOpen}
-        onOpenChange={setCommandOpen}
-        onOpenAddLinks={() => setAddLinksOpen(true)}
-      />
+      {/* 3. Lower Grid: Active Studio Radar & Recent Ingested References */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left: Active Working Scripts */}
+        <div className="bg-card border border-border rounded-lg p-5 space-y-4 flex flex-col justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                <FileText className="size-3.5" />
+                <span>Active Production Studio</span>
+              </h3>
+              <Link href="/contents" className="text-[11px] font-mono text-muted-foreground hover:text-foreground">
+                View all →
+              </Link>
+            </div>
 
-      {/* Global Add Links Dialog */}
-      <AddLinksDialog
-        open={addLinksOpen}
-        onOpenChange={setAddLinksOpen}
-      />
+            {data.activeContents.length === 0 ? (
+              <div className="p-8 text-center rounded border border-dashed border-border bg-secondary/30 space-y-2">
+                <FileVideo className="size-6 mx-auto text-muted-foreground" />
+                <p className="text-xs font-mono text-muted-foreground">
+                  No active scripts in progress. Pick a curated reference or create a new original content piece.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {data.activeContents.map((c) => (
+                  <Link
+                    key={c.id}
+                    href={`/contents/${c.id}`}
+                    className="block p-3 rounded border border-border bg-secondary/30 hover:border-foreground/40 transition-colors group"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-mono font-bold text-foreground group-hover:underline line-clamp-1">
+                        {c.title}
+                      </span>
+                      {c.formatName && (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-foreground text-background uppercase tracking-wider">
+                          {c.formatName}
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <Link href="/contents/new" className="pt-2">
+            <Button variant="outline" size="sm" className="w-full text-xs font-mono h-8 gap-1.5">
+              <Plus className="size-3" />
+              <span>Create New Content Piece</span>
+            </Button>
+          </Link>
+        </div>
+
+        {/* Right: Recent Ingested References */}
+        <div className="bg-card border border-border rounded-lg p-5 space-y-4 flex flex-col justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                <Sparkles className="size-3.5" />
+                <span>Recently Ingested Inspiration</span>
+              </h3>
+              <Link href="/references" className="text-[11px] font-mono text-muted-foreground hover:text-foreground">
+                Browse Library →
+              </Link>
+            </div>
+
+            {data.recentRefs.length === 0 ? (
+              <div className="p-8 text-center rounded border border-dashed border-border bg-secondary/30 space-y-2">
+                <Bookmark className="size-6 mx-auto text-muted-foreground" />
+                <p className="text-xs font-mono text-muted-foreground">
+                  No references ingested yet. Paste your first video link above to get started!
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {data.recentRefs.map((r) => (
+                  <div
+                    key={r.id}
+                    className="flex items-center justify-between gap-3 p-2.5 rounded border border-border bg-secondary/20 hover:border-foreground/30 transition-colors"
+                  >
+                    <Link
+                      href={`/references/${r.id}`}
+                      className="text-xs font-mono text-foreground hover:underline line-clamp-1 flex-1"
+                    >
+                      {r.summary || r.url}
+                    </Link>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <StatusBadge status={r.status} size="sm" />
+                      <a
+                        href={r.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-muted-foreground hover:text-foreground p-1"
+                      >
+                        <ExternalLink className="size-3" />
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <Link href="/inbox" className="pt-2">
+            <Button variant="outline" size="sm" className="w-full text-xs font-mono h-8 gap-1.5">
+              <Inbox className="size-3" />
+              <span>Open Ingest Inbox</span>
+            </Button>
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
 
-function CategoryPill({
-  href,
-  icon,
-  label,
-  count,
-  highlight,
-}: {
-  href: string;
-  icon: React.ReactNode;
-  label: string;
-  count?: number;
-  highlight?: boolean;
-}) {
+function BarChart3(props: React.SVGProps<SVGSVGElement>) {
   return (
-    <Link
-      href={href}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-border bg-card hover:bg-secondary text-foreground/80 hover:text-foreground transition-all shadow-none ${
-        highlight ? "border-destructive/40 text-destructive" : ""
-      }`}
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
     >
-      {icon}
-      <span>{label}</span>
-      {typeof count === "number" && count > 0 && (
-        <span
-          className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${
-            highlight
-              ? "bg-destructive text-destructive-foreground font-bold"
-              : "bg-secondary text-secondary-foreground"
-          }`}
-        >
-          {count}
-        </span>
-      )}
-    </Link>
+      <path d="M3 3v18h18" />
+      <path d="M18 17V9" />
+      <path d="M13 17V5" />
+      <path d="M8 17v-3" />
+    </svg>
   );
 }
