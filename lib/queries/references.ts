@@ -19,10 +19,14 @@ let cachedFormats: Map<string, string> | null = null;
 
 export async function getPlatformIdBySlug(slug: Platform): Promise<string> {
   if (!cachedPlatforms) {
-    const rows = await db.select({ id: platforms.id, slug: platforms.slug }).from(platforms);
-    cachedPlatforms = new Map(rows.map((r) => [r.slug, r.id]));
+    try {
+      const rows = await db.select({ id: platforms.id, slug: platforms.slug }).from(platforms);
+      cachedPlatforms = new Map(rows.map((r) => [r.slug, r.id]));
+    } catch (e) {
+      console.warn("Platform cache fetch warning, falling back to direct lookup:", e);
+    }
   }
-  const id = cachedPlatforms.get(slug);
+  const id = cachedPlatforms?.get(slug);
   if (id) return id;
 
   const [row] = await db
@@ -32,11 +36,12 @@ export async function getPlatformIdBySlug(slug: Platform): Promise<string> {
     .limit(1);
 
   if (row) {
+    if (!cachedPlatforms) cachedPlatforms = new Map();
     cachedPlatforms.set(slug, row.id);
     return row.id;
   }
 
-  const otherId = cachedPlatforms.get("other");
+  const otherId = cachedPlatforms?.get("other");
   if (otherId) return otherId;
 
   const [otherRow] = await db
@@ -45,16 +50,20 @@ export async function getPlatformIdBySlug(slug: Platform): Promise<string> {
     .where(eq(platforms.slug, "other"))
     .limit(1);
 
-  return otherRow.id;
+  return otherRow?.id || "";
 }
 
 export async function getFormatIdBySlug(slug: ContentFormatGuess): Promise<string | undefined> {
   if (!slug) return undefined;
   if (!cachedFormats) {
-    const rows = await db.select({ id: formats.id, slug: formats.slug }).from(formats);
-    cachedFormats = new Map(rows.map((r) => [r.slug, r.id]));
+    try {
+      const rows = await db.select({ id: formats.id, slug: formats.slug }).from(formats);
+      cachedFormats = new Map(rows.map((r) => [r.slug, r.id]));
+    } catch (e) {
+      console.warn("Format cache fetch warning, falling back to direct lookup:", e);
+    }
   }
-  const id = cachedFormats.get(slug);
+  const id = cachedFormats?.get(slug);
   if (id) return id;
 
   const [row] = await db
@@ -64,6 +73,7 @@ export async function getFormatIdBySlug(slug: ContentFormatGuess): Promise<strin
     .limit(1);
 
   if (row) {
+    if (!cachedFormats) cachedFormats = new Map();
     cachedFormats.set(slug, row.id);
     return row.id;
   }
