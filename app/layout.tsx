@@ -18,10 +18,10 @@ const jbmono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { default: "RMS", template: "%s · RMS" },
-  description: "Personal content management.",
-  applicationName: "RMS",
-  appleWebApp: { capable: true, title: "RMS", statusBarStyle: "default" },
+  title: { default: "Folio", template: "%s · Folio" },
+  description: "Personal content system.",
+  applicationName: "Folio",
+  appleWebApp: { capable: true, title: "Folio", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {

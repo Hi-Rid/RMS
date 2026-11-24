@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { sql, eq, and, isNull, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -10,7 +11,6 @@ import {
   snippets,
   pillars,
   refPillars,
-  platforms,
   posts,
   appSettings,
 } from "@/db/schema";
@@ -34,7 +34,7 @@ export type SidebarCounts = {
   };
 };
 
-export async function getSidebarCounts(): Promise<SidebarCounts> {
+export const getSidebarCounts = cache(async (): Promise<SidebarCounts> => {
   const defaultCounts: SidebarCounts = {
     inbox: 0,
     references: 0,
@@ -55,17 +55,75 @@ export async function getSidebarCounts(): Promise<SidebarCounts> {
   };
 
   try {
-    const now = new Date();
+    // Run all count queries concurrently in parallel
+    const [
+      statusCountsQuery,
+      contentCountRes,
+      dueSnapshotsRes,
+      audioRes,
+      sourcesRes,
+      snippetsRes,
+      activePillars,
+      pillarCountsQuery,
+    ] = await Promise.all([
+      // 1. Status counts
+      db
+        .select({
+          status: refs.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(refs)
+        .where(isNull(refs.archivedAt))
+        .groupBy(refs.status),
 
-    // 1. Ref counts per status (active only)
-    const statusCountsQuery = await db
-      .select({
-        status: refs.status,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(refs)
-      .where(isNull(refs.archivedAt))
-      .groupBy(refs.status);
+      // 2. Content count
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(contents)
+        .where(isNull(contents.archivedAt)),
+
+      // 3. Due snapshots
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(snapshots)
+        .where(
+          and(
+            eq(snapshots.status, "pending"),
+            lte(snapshots.dueAt, sql`now()`)
+          )
+        ),
+
+      // 4. Audios
+      db.select({ count: sql<number>`count(*)::int` }).from(audios),
+
+      // 5. Sources
+      db.select({ count: sql<number>`count(*)::int` }).from(sourceAccounts),
+
+      // 6. Snippets
+      db.select({ count: sql<number>`count(*)::int` }).from(snippets),
+
+      // 7. Active pillars
+      db
+        .select({
+          id: pillars.id,
+          name: pillars.name,
+          slug: pillars.slug,
+          sortOrder: pillars.sortOrder,
+        })
+        .from(pillars)
+        .where(eq(pillars.isActive, true))
+        .orderBy(pillars.sortOrder),
+
+      // 8. Pillar reference counts
+      db
+        .select({
+          pillarId: refPillars.pillarId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(refPillars)
+        .innerJoin(refs, and(eq(refPillars.refId, refs.id), isNull(refs.archivedAt)))
+        .groupBy(refPillars.pillarId),
+    ]);
 
     const statusMap = {
       inbox: 0,
@@ -84,49 +142,6 @@ export async function getSidebarCounts(): Promise<SidebarCounts> {
       totalActiveRefs += Number(row.count) || 0;
     }
 
-    // 2. Active contents count
-    const [contentCountRes] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(contents)
-      .where(isNull(contents.archivedAt));
-
-    // 3. Due snapshots count
-    const [dueSnapshotsRes] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(snapshots)
-      .where(
-        and(
-          eq(snapshots.status, "pending"),
-          lte(snapshots.dueAt, sql`now()`)
-        )
-      );
-
-    // 4. Audios, sources, snippets
-    const [audioRes] = await db.select({ count: sql<number>`count(*)::int` }).from(audios);
-    const [sourcesRes] = await db.select({ count: sql<number>`count(*)::int` }).from(sourceAccounts);
-    const [snippetsRes] = await db.select({ count: sql<number>`count(*)::int` }).from(snippets);
-
-    // 5. Active pillars with count of active refs
-    const activePillars = await db
-      .select({
-        id: pillars.id,
-        name: pillars.name,
-        slug: pillars.slug,
-        sortOrder: pillars.sortOrder,
-      })
-      .from(pillars)
-      .where(eq(pillars.isActive, true))
-      .orderBy(pillars.sortOrder);
-
-    const pillarCountsQuery = await db
-      .select({
-        pillarId: refPillars.pillarId,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(refPillars)
-      .innerJoin(refs, and(eq(refPillars.refId, refs.id), isNull(refs.archivedAt)))
-      .groupBy(refPillars.pillarId);
-
     const pillarCountMap = new Map<string, number>();
     for (const row of pillarCountsQuery) {
       pillarCountMap.set(row.pillarId, Number(row.count) || 0);
@@ -142,11 +157,11 @@ export async function getSidebarCounts(): Promise<SidebarCounts> {
     return {
       inbox: statusMap.inbox,
       references: totalActiveRefs,
-      contents: Number(contentCountRes?.count) || 0,
-      evaluate: Number(dueSnapshotsRes?.count) || 0,
-      audio: Number(audioRes?.count) || 0,
-      sources: Number(sourcesRes?.count) || 0,
-      captions: Number(snippetsRes?.count) || 0,
+      contents: Number(contentCountRes[0]?.count) || 0,
+      evaluate: Number(dueSnapshotsRes[0]?.count) || 0,
+      audio: Number(audioRes[0]?.count) || 0,
+      sources: Number(sourcesRes[0]?.count) || 0,
+      captions: Number(snippetsRes[0]?.count) || 0,
       pillars: pillarList,
       statuses: statusMap,
     };
@@ -154,7 +169,7 @@ export async function getSidebarCounts(): Promise<SidebarCounts> {
     console.error("Failed to fetch sidebar counts:", error);
     return defaultCounts;
   }
-}
+});
 
 export type HomeData = {
   counts: SidebarCounts;
@@ -171,41 +186,40 @@ export type HomeData = {
   }[];
 };
 
-export async function getHomeData(): Promise<HomeData> {
-  const counts = await getSidebarCounts();
+export const getHomeData = cache(async (): Promise<HomeData> => {
+  const countsPromise = getSidebarCounts();
 
   try {
-    // 1. Weekly target & posts this week (WIB timezone, Monday-Sunday)
-    let weeklyTarget = 3;
-    const [settings] = await db.select({ weeklyPostTarget: appSettings.weeklyPostTarget }).from(appSettings).limit(1);
-    if (settings?.weeklyPostTarget) {
-      weeklyTarget = settings.weeklyPostTarget;
-    }
-
-    // Posts posted in the last 7 days / this week
-    const [weeklyPostsRes] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(posts)
-      .where(sql`posted_at >= date_trunc('week', now() at time zone 'Asia/Jakarta') at time zone 'Asia/Jakarta'`);
-
-    // 2. Recent 6 references
-    const recentRefsQuery = await db
-      .select({
-        id: refs.id,
-        url: refs.url,
-        summary: refs.summary,
-        status: refs.status,
-        savedAt: refs.savedAt,
-      })
-      .from(refs)
-      .where(isNull(refs.archivedAt))
-      .orderBy(sql`${refs.savedAt} desc`)
-      .limit(6);
+    const [counts, [settings], [weeklyPostsRes], recentRefsQuery] = await Promise.all([
+      countsPromise,
+      db
+        .select({ weeklyPostTarget: appSettings.weeklyPostTarget })
+        .from(appSettings)
+        .limit(1),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(posts)
+        .where(
+          sql`posted_at >= date_trunc('week', now() at time zone 'Asia/Jakarta') at time zone 'Asia/Jakarta'`
+        ),
+      db
+        .select({
+          id: refs.id,
+          url: refs.url,
+          summary: refs.summary,
+          status: refs.status,
+          savedAt: refs.savedAt,
+        })
+        .from(refs)
+        .where(isNull(refs.archivedAt))
+        .orderBy(sql`${refs.savedAt} desc`)
+        .limit(6),
+    ]);
 
     return {
       counts,
       weeklyTarget: {
-        target: weeklyTarget,
+        target: settings?.weeklyPostTarget || 3,
         posted: Number(weeklyPostsRes?.count) || 0,
       },
       recentRefs: recentRefsQuery.map((r) => ({
@@ -218,10 +232,11 @@ export async function getHomeData(): Promise<HomeData> {
     };
   } catch (err) {
     console.error("Failed to fetch home data:", err);
+    const counts = await countsPromise;
     return {
       counts,
       weeklyTarget: { target: 3, posted: 0 },
       recentRefs: [],
     };
   }
-}
+});
