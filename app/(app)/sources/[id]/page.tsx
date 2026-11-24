@@ -1,21 +1,20 @@
-import { Users } from "lucide-react";
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { notFound } from "next/navigation";
+import { getSourceById } from "@/lib/queries/sources";
+import { SourceDetailClient } from "./source-detail-client";
 
-export default async function SourceDetailPage({
-  params,
-}: {
+export const instant = false;
+
+interface SourceDetailPageProps {
   params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
+}
 
-  return (
-    <PlaceholderPage
-      title="Source Detail"
-      description={`View performance stats, notes, and references from source account ${id}.`}
-      phase="Prompt P12"
-      icon={<Users className="size-6" />}
-      backHref="/sources"
-      backLabel="Back to Sources"
-    />
-  );
+export default async function SourceDetailPage({ params }: SourceDetailPageProps) {
+  const { id } = await params;
+  const data = await getSourceById(id);
+
+  if (!data) {
+    notFound();
+  }
+
+  return <SourceDetailClient data={data} />;
 }

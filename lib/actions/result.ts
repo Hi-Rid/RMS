@@ -11,7 +11,7 @@ export type ActionResult<T = void> =
         };
     };
 
-export const ok = <T>(data: T): ActionResult<T> => ({ ok: true, data });
+export const ok = <T = void>(data?: T): ActionResult<T> => ({ ok: true, data: data as T });
 
 export const fail = (
     code: ErrorCode,

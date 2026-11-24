@@ -1,13 +1,16 @@
-import { LineChart } from "lucide-react";
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { connection } from "next/server";
+import { getInsightData } from "@/lib/queries/insight";
+import { InsightClient } from "./insight-client";
 
-export default function InsightPage() {
-  return (
-    <PlaceholderPage
-      title="Insight & Analytics"
-      description="Data-driven ranking of your best sources, pillars, formats, hooks, and audio with sample size verification."
-      phase="Prompt P17"
-      icon={<LineChart className="size-6" />}
-    />
+export const instant = false;
+
+export default async function InsightPage() {
+  await connection();
+  const data = await getInsightData();
+  const hasGeminiKey = Boolean(
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+    process.env.GEMINI_API_KEY
   );
+
+  return <InsightClient initialData={data} hasGeminiKey={hasGeminiKey} />;
 }

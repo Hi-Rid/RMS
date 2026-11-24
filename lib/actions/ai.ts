@@ -178,3 +178,76 @@ Tone: Confident, fast-paced, high retention.`,
     return fail("ai_failed", "Failed to draft script with AI.");
   }
 }
+
+const explainPatternSchema = z.object({
+  group: z.enum(["high", "low", "all"]).default("high"),
+  items: z.array(
+    z.object({
+      title: z.string(),
+      finalRating: z.number().nullable().optional(),
+      formatName: z.string().nullable().optional(),
+      hookTypeName: z.string().nullable().optional(),
+    })
+  ).min(1, "At least one content item is required"),
+});
+
+export interface ExplainPatternResult {
+  summary: string;
+  keyObservations: string[];
+  caveats: string;
+}
+
+/**
+ * AI-09: Explain outlier performance patterns without making causal claims.
+ */
+export async function aiExplainPattern(
+  input: z.infer<typeof explainPatternSchema>
+): Promise<ActionResult<ExplainPatternResult>> {
+  await requireActionOwner();
+
+  const google = getGoogleClient();
+  if (!google) {
+    return fail(
+      "ai_disabled",
+      "Google Gemini API key is not configured. Please add your free key in .env.local."
+    );
+  }
+
+  try {
+    const output = await runWithModelFallback(async (model) => {
+      const res = await generateText({
+        model,
+        output: Output.object({
+          schema: z.object({
+            summary: z.string().describe("Concise 1-2 sentence pattern summary across the outlier contents"),
+            keyObservations: z
+              .array(z.string())
+              .min(2)
+              .max(4)
+              .describe("Bullet points of observable commonalities in hook types, formats, or themes"),
+            caveats: z
+              .string()
+              .describe("Sample size and correlation vs causation caveat note"),
+          }),
+        }),
+        prompt: `You are an analytical short-form video strategist reviewing content outliers (${input.group === "high" ? "top performers" : "underperformers"}).
+Analyze these content items:
+${JSON.stringify(input.items, null, 2)}
+
+Rules:
+1. Do NOT make definitive causal claims (e.g. say 'tended to feature' or 'observed correlation', never 'caused high views').
+2. Point out common themes in hook archetype, formatting, or presentation styles.
+3. Explicitly state sample size limitations.
+4. Keep observations actionable, grounded in data, and concise.`,
+      });
+
+      return res.output;
+    });
+
+    return ok(output);
+  } catch (err: unknown) {
+    console.error("AI Explain Pattern error:", err);
+    return fail("ai_failed", "Failed to analyze outlier patterns with AI.");
+  }
+}
+

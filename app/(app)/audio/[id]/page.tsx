@@ -1,21 +1,20 @@
-import { Music } from "lucide-react";
-import { PlaceholderPage } from "@/components/app/placeholder-page";
+import { notFound } from "next/navigation";
+import { getAudioById } from "@/lib/queries/audio";
+import { AudioDetailClient } from "./audio-detail-client";
 
-export default async function AudioDetailPage({
-  params,
-}: {
+export const instant = false;
+
+interface AudioDetailPageProps {
   params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
+}
 
-  return (
-    <PlaceholderPage
-      title="Audio Detail"
-      description={`Inspect references and contents utilizing audio ${id}, and manage sound metadata.`}
-      phase="Prompt P7"
-      icon={<Music className="size-6" />}
-      backHref="/audio"
-      backLabel="Back to Audio"
-    />
-  );
+export default async function AudioDetailPage({ params }: AudioDetailPageProps) {
+  const { id } = await params;
+  const data = await getAudioById(id);
+
+  if (!data) {
+    notFound();
+  }
+
+  return <AudioDetailClient data={data} />;
 }
