@@ -7,6 +7,16 @@ import { z } from "zod";
 const emptyAsUndefined = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((val) => (typeof val === "string" && val.trim() === "" ? undefined : val), schema);
 
+const normalizeAppUrl = (val: unknown): string | undefined => {
+  if (typeof val !== "string") return undefined;
+  const trimmed = val.trim().replace(/\/+$/, "");
+  if (!trimmed) return undefined;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return /^localhost\b|^127\.0\.0\.1\b/i.test(trimmed)
+    ? `http://${trimmed}`
+    : `https://${trimmed}`;
+};
+
 const schema = z.object({
   DATABASE_URL: emptyAsUndefined(z.string().min(1).optional()),
   DIRECT_URL: emptyAsUndefined(z.string().min(1).optional()),
@@ -25,7 +35,10 @@ const schema = z.object({
   META_VERIFY_TOKEN: emptyAsUndefined(z.string().optional()),
   NEXT_PUBLIC_SUPABASE_URL: emptyAsUndefined(z.string().url().optional()),
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: emptyAsUndefined(z.string().min(1).optional()),
-  NEXT_PUBLIC_APP_URL: emptyAsUndefined(z.string().url().default("http://localhost:3000")),
+  NEXT_PUBLIC_APP_URL: z.preprocess(
+    normalizeAppUrl,
+    z.string().url().default("http://localhost:3000")
+  ),
 });
 
 const parsed = schema.safeParse(process.env);

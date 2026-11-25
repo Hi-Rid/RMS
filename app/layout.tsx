@@ -17,10 +17,28 @@ const jbmono = JetBrains_Mono({
   display: "swap",
 });
 
-const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+function resolveMetadataBase(): URL {
+  const raw =
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() ||
+    process.env.VERCEL_URL?.trim() ||
+    "http://localhost:3000";
+
+  const normalized = /^https?:\/\//i.test(raw)
+    ? raw
+    : /^localhost\b|^127\.0\.0\.1\b/i.test(raw)
+      ? `http://${raw}`
+      : `https://${raw}`;
+
+  try {
+    return new URL(normalized);
+  } catch {
+    return new URL("http://localhost:3000");
+  }
+}
 
 export const metadata: Metadata = {
-  metadataBase: new URL(appUrl),
+  metadataBase: resolveMetadataBase(),
   title: { default: "RMS", template: "%s · RMS" },
   description: "Reference Management & Content Studio.",
   applicationName: "RMS",
