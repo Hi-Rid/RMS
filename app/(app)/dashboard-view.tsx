@@ -30,6 +30,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/app/status-badge";
+import { BrandLogo } from "@/components/app/brand-logo";
 import { createReferenceFromUrl } from "@/lib/actions/references";
 import { toast } from "sonner";
 import type { HomeData } from "@/lib/queries/home";
@@ -93,9 +94,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
       <div className="relative space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border/80 pb-5">
           <div className="flex items-center gap-3">
-            <div className="size-10 rounded-md bg-foreground text-background flex items-center justify-center font-display font-black text-lg">
-              R
-            </div>
+            <BrandLogo className="size-10 p-1.5" />
             <div>
               <h1 className="text-xl sm:text-2xl font-black font-display tracking-tight text-foreground">
                 Hi, {displayName}

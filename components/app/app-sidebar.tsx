@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { BrandLogo } from "@/components/app/brand-logo";
 import { signOut } from "@/lib/actions/auth";
 import type { SidebarCounts } from "@/lib/queries/home";
 
@@ -149,9 +150,10 @@ function AppSidebarFrame({
             onClick={onNavigate}
             className="flex items-center gap-2.5 min-w-0 group"
           >
-            <div className="size-8 shrink-0 rounded-md bg-sidebar-primary text-sidebar-primary-foreground flex items-center justify-center font-mono text-xs font-bold tracking-tight">
-              R
-            </div>
+            <BrandLogo
+              className="size-8 transition-colors group-hover:border-foreground/30"
+              decorative={!collapsed}
+            />
             {!collapsed && (
               <div className="flex items-baseline gap-1.5 min-w-0">
                 <span className="font-display font-black text-lg tracking-tight text-foreground">

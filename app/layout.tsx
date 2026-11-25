@@ -17,17 +17,31 @@ const jbmono = JetBrains_Mono({
   display: "swap",
 });
 
+const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(appUrl),
   title: { default: "RMS", template: "%s · RMS" },
   description: "Reference Management & Content Studio.",
   applicationName: "RMS",
   appleWebApp: { capable: true, title: "RMS", statusBarStyle: "default" },
+  openGraph: {
+    type: "website",
+    siteName: "RMS",
+    title: "RMS — Reference Management & Content Studio",
+    description: "Reference Management & Content Studio.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "RMS — Reference Management & Content Studio",
+    description: "Reference Management & Content Studio.",
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#FFFFFF",
+  themeColor: "#800115",
 };
 
 export default function RootLayout({

@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { AppSidebar } from "@/components/app/app-sidebar";
+import { BrandLogo } from "@/components/app/brand-logo";
 import { CommandPalette } from "@/components/app/command-palette";
 import { AddLinksDialog } from "@/components/app/add-links-dialog";
 import type { SidebarCounts } from "@/lib/queries/home";
@@ -115,9 +116,7 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
             </Sheet>
 
             <Link href="/" className="flex items-center gap-2 min-w-0">
-              <div className="size-7 shrink-0 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-mono text-[11px] font-bold">
-                R
-              </div>
+              <BrandLogo className="size-7" />
               <span className="font-display font-black text-base tracking-tight text-foreground">
                 RMS
               </span>

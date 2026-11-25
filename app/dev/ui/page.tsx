@@ -5,6 +5,7 @@ import { Feather, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { BrandLogo } from "@/components/app/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -24,7 +25,10 @@ export default function DevUiPage() {
         <div className="container mx-auto max-w-4xl space-y-12 px-6 py-12">
             <header className="space-y-2">
                 <div className="label-mono text-muted-foreground">Design tokens · dev only</div>
-                <h1 className="text-display">RMS</h1>
+                <div className="flex items-center gap-3">
+                    <BrandLogo className="size-10 p-1.5" />
+                    <h1 className="text-display">RMS</h1>
+                </div>
                 <p className="text-muted-foreground">
                     Visual check for §13 tokens: JetBrains Mono body, Archivo display, flat surfaces, chip toggles.
                 </p>

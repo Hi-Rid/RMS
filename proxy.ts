@@ -23,7 +23,9 @@ export async function proxy(request: NextRequest) {
     pathname === "/manifest.webmanifest" ||
     pathname === "/favicon.ico" ||
     pathname === "/icon.svg" ||
-    pathname === "/apple-icon";
+    pathname.startsWith("/apple-icon") ||
+    pathname.startsWith("/opengraph-image") ||
+    pathname.startsWith("/twitter-image");
 
   const { supabaseResponse, claims } = await updateSession(request);
 

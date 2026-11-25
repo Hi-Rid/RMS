@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { AlertTriangle } from "lucide-react";
+import { BrandLogo } from "@/components/app/brand-logo";
 
 interface AuthShellProps {
   children: React.ReactNode;
@@ -18,9 +19,7 @@ export function AuthShell({ children, footerText }: AuthShellProps) {
     <div className="flex min-h-dvh w-full items-center justify-center bg-background p-4 sm:p-6">
       <div className="w-full max-w-sm space-y-5">
         <div className="text-center space-y-1">
-          <div className="inline-flex size-10 items-center justify-center rounded-control bg-primary text-primary-foreground font-mono text-sm font-bold tracking-widest mb-2">
-            R
-          </div>
+          <BrandLogo className="inline-flex size-12 rounded-xl p-2 mb-2" />
           <h1 className="text-3xl font-black tracking-tight text-foreground font-display">
             RMS
           </h1>
