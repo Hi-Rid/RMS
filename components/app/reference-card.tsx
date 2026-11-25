@@ -134,8 +134,8 @@ export function ReferenceCard({
         onClick={() => router.push(`/references/${reference.id}`)}
         className="group/card bg-card border border-border rounded-lg overflow-hidden transition-all hover:border-foreground/40 cursor-pointer flex flex-col justify-between"
       >
-        <div className="space-y-3">
-          {/* PRD §12.0: Area Pratinjau (Sampul / Visual Preview) */}
+        <div className="space-y-2.5">
+          {/* Preview (compact 4:5 frame housing 9:16 media + blurred sidebars) */}
           <ReferencePreview
             url={reference.url}
             platform={reference.platform.slug}
@@ -144,25 +144,26 @@ export function ReferenceCard({
             hookText={reference.hookText}
             summary={reference.summary}
             handle={reference.sourceAccount?.handle}
+            className="aspect-[4/5] rounded-none border-0 border-b"
           />
 
-          <div className="p-3.5 pt-0 space-y-2.5">
+          <div className="px-3 pb-2 space-y-2">
             {/* Top Row: PILLAR · FORMAT mono label & Status Badge */}
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center justify-between gap-1.5 flex-wrap">
+              <div className="flex items-center gap-1 flex-wrap">
                 {headerMonoLabel ? (
-                  <span className="text-[11px] font-mono uppercase font-bold tracking-wider text-muted-foreground">
+                  <span className="text-[10px] font-mono uppercase font-bold tracking-wider text-muted-foreground">
                     {headerMonoLabel}
                   </span>
                 ) : (
-                  <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                  <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 border border-amber-500/30 flex items-center gap-1">
                     <AlertCircle className="size-3" />
                     <span>Needs details</span>
                   </span>
                 )}
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1">
                 <StatusBadge status={reference.status} size="sm" />
                 <a
                   href={reference.url}
@@ -170,37 +171,39 @@ export function ReferenceCard({
                   rel="noopener noreferrer"
                   title="Open original URL"
                   onClick={(e) => e.stopPropagation()}
-                  className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                  className="text-muted-foreground hover:text-foreground transition-colors p-0.5"
                 >
-                  <ExternalLink className="size-3.5" />
+                  <ExternalLink className="size-3" />
                 </a>
               </div>
             </div>
 
             {/* Title / Hook Preview */}
-            <h3 className="text-xs font-mono font-semibold text-foreground line-clamp-2 leading-relaxed group-hover/card:underline underline-offset-2">
+            <h3 className="text-xs font-mono font-semibold text-foreground line-clamp-2 leading-snug group-hover/card:underline underline-offset-2">
               {fallbackTitle}
             </h3>
 
-            {/* Description Row: @handle · Status · ♪ Audio */}
-            <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground flex-wrap">
-              {reference.sourceAccount && (
-                <span className="flex items-center gap-1 text-foreground/80 font-medium">
-                  <User className="size-3 text-muted-foreground/70" />
-                  <span>@{reference.sourceAccount.handle}</span>
-                </span>
-              )}
-              {reference.sourceAccount && reference.audio && <span>&middot;</span>}
-              {reference.audio && (
-                <span className="flex items-center gap-1 truncate max-w-[170px]" title={reference.audio.title}>
-                  <Music className="size-3 text-muted-foreground/70 shrink-0" />
-                  <span className="truncate">{reference.audio.title}</span>
-                </span>
-              )}
-            </div>
+            {/* Description Row: @handle · Audio */}
+            {(reference.sourceAccount || reference.audio) && (
+              <div className="flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground flex-wrap">
+                {reference.sourceAccount && (
+                  <span className="flex items-center gap-1 text-foreground/80 font-medium truncate max-w-[120px]">
+                    <User className="size-3 text-muted-foreground/70 shrink-0" />
+                    <span className="truncate">@{reference.sourceAccount.handle}</span>
+                  </span>
+                )}
+                {reference.sourceAccount && reference.audio && <span>&middot;</span>}
+                {reference.audio && (
+                  <span className="flex items-center gap-1 truncate max-w-[130px]" title={reference.audio.title}>
+                    <Music className="size-3 text-muted-foreground/70 shrink-0" />
+                    <span className="truncate">{reference.audio.title}</span>
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Chips Row: Unused, Pillars & Tags */}
-            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+            <div className="flex items-center gap-1 flex-wrap pt-0.5">
               {isUnused && (
                 <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary text-primary-foreground font-bold">
                   Unused
@@ -231,7 +234,7 @@ export function ReferenceCard({
         {/* Action Bar at the Bottom */}
         <div
           onClick={(e) => e.stopPropagation()}
-          className="p-3.5 pt-2 border-t border-border/60 flex items-center justify-between gap-1.5 flex-wrap"
+          className="px-3 py-2 border-t border-border/60 flex items-center justify-between gap-1 flex-wrap"
         >
           <div className="flex items-center gap-1">
             <Button
@@ -248,10 +251,10 @@ export function ReferenceCard({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 text-[11px] font-mono text-muted-foreground hover:text-foreground"
+                className="h-7 px-1.5 text-[11px] font-mono text-muted-foreground hover:text-foreground"
               >
                 <span>Detail</span>
-                <ArrowRight className="size-3 ml-1" />
+                <ArrowRight className="size-3 ml-0.5" />
               </Button>
             </Link>
           </div>
@@ -264,7 +267,7 @@ export function ReferenceCard({
                   size="sm"
                   disabled={isPending}
                   onClick={handleRestore}
-                  className="h-7 px-2.5 text-[11px] font-mono gap-1"
+                  className="h-7 px-2 text-[11px] font-mono gap-1"
                 >
                   <RotateCcw className="size-3" />
                   <span>Restore</span>
@@ -287,7 +290,7 @@ export function ReferenceCard({
                         size="sm"
                         disabled={isPending}
                         onClick={handleSelect}
-                        className="h-7 px-2.5 text-[11px] font-mono bg-foreground text-background hover:bg-foreground/90 font-bold"
+                        className="h-7 px-2 text-[11px] font-mono bg-foreground text-background hover:bg-foreground/90 font-bold"
                       >
                         <CheckCircle2 className="size-3 mr-1" />
                         <span>Select</span>
@@ -296,13 +299,13 @@ export function ReferenceCard({
                   )}
 
                   {isSelected && (
-                    <Link href={`/contents/new?refId=${reference.id}`}>
+                    <Link href={`/contents/new?refId=${reference.id}`} title="Create Content">
                       <Button
                         size="sm"
-                        className="h-7 px-2.5 text-[11px] font-mono bg-foreground text-background hover:bg-foreground/90 font-bold"
+                        className="h-7 px-2 text-[11px] font-mono bg-foreground text-background hover:bg-foreground/90 font-bold"
                       >
                         <Plus className="size-3 mr-1" />
-                        <span>Create Content</span>
+                        <span>Create</span>
                       </Button>
                     </Link>
                   )}

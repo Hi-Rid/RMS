@@ -216,15 +216,13 @@ export function ReferencePreview({
 
       {/* Persistent Top Overlay: Platform Badge (when image thumbnail is active) */}
       {activeThumbnail && (
-        <div className="absolute top-2.5 left-2.5 z-30 flex items-center gap-1.5 pointer-events-none">
-          <span
-            className={`text-[10px] font-mono uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${details.pillBg} flex items-center gap-1 shadow-xs backdrop-blur-xs`}
-          >
+        <div className="absolute top-2 left-2 z-30 flex items-center gap-1 pointer-events-none">
+          <span className="text-[10px] font-mono uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border bg-black/75 text-white border-white/20 flex items-center gap-1 backdrop-blur-xs">
             <PlatformIcon className="size-3" />
             <span>{details.name}</span>
           </span>
           {format && (
-            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/60 text-white/90 border border-white/20 backdrop-blur-xs">
+            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/65 text-white/90 border border-white/20 backdrop-blur-xs">
               {format}
             </span>
           )}
