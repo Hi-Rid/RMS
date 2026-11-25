@@ -62,8 +62,8 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
 
   return (
     <div className="flex h-dvh w-full bg-background overflow-hidden">
-      {/* Desktop Sidebar (visible on lg+) */}
-      <div className="hidden lg:flex shrink-0 h-full">
+      {/* Desktop Floating Sidebar (visible on lg+) */}
+      <div className="hidden lg:flex shrink-0 h-full p-2.5 pr-0">
         <AppSidebar
           counts={counts}
           ownerEmail={ownerEmail}
