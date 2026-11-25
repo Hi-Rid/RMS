@@ -15,6 +15,138 @@ const verifySchema = z.object({
   code: z.string().length(6),
 });
 
+const passwordLoginSchema = z.object({
+  email: z.string().email("Please enter a valid email address."),
+  password: z.string().min(1, "Password is required."),
+});
+
+const registerSchema = z.object({
+  email: z.string().email("Please enter a valid email address."),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters.")
+    .max(128, "Password is too long."),
+});
+
+function hasSupabaseConfig(): boolean {
+  return Boolean(
+    env.NEXT_PUBLIC_SUPABASE_URL && env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  );
+}
+
+export async function signInWithPassword(input: {
+  email: string;
+  password: string;
+}): Promise<ActionResult<{ email: string }>> {
+  const parsed = passwordLoginSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid credentials.");
+  }
+
+  if (!hasSupabaseConfig()) {
+    return fail(
+      "blocked",
+      "Supabase Auth is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to .env.local."
+    );
+  }
+
+  const email = parsed.data.email.trim().toLowerCase();
+  const ownerEmail = env.OWNER_EMAIL?.trim().toLowerCase();
+
+  if (ownerEmail && email !== ownerEmail) {
+    return fail("unauthorized", "Invalid email or password.");
+  }
+
+  try {
+    const supabase = await createServerClient();
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password: parsed.data.password,
+    });
+
+    if (error || !data.user || !data.user.email) {
+      const msg = error?.message?.toLowerCase() || "";
+      if (msg.includes("email not confirmed")) {
+        return fail("unauthorized", "Please verify your email address before signing in.");
+      }
+      return fail("unauthorized", "Invalid email or password.");
+    }
+
+    if (ownerEmail && data.user.email.toLowerCase() !== ownerEmail) {
+      await supabase.auth.signOut();
+      return fail("unauthorized", "Unauthorized account.");
+    }
+
+    return ok({ email: data.user.email });
+  } catch {
+    return fail("unauthorized", "Sign in failed. Please try again.");
+  }
+}
+
+export async function registerWithPassword(input: {
+  email: string;
+  password: string;
+}): Promise<ActionResult<{ email: string; needsEmailVerification: boolean }>> {
+  const parsed = registerSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid registration details.");
+  }
+
+  if (!hasSupabaseConfig()) {
+    return fail(
+      "blocked",
+      "Supabase Auth is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to .env.local."
+    );
+  }
+
+  const email = parsed.data.email.trim().toLowerCase();
+  const ownerEmail = env.OWNER_EMAIL?.trim().toLowerCase();
+
+  if (ownerEmail && email !== ownerEmail) {
+    return fail(
+      "blocked",
+      "Registration is restricted to the configured owner account."
+    );
+  }
+
+  const appUrl = (env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/+$/, "");
+
+  try {
+    const supabase = await createServerClient();
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password: parsed.data.password,
+      options: {
+        emailRedirectTo: `${appUrl}/auth/confirm`,
+      },
+    });
+
+    if (error) {
+      const msg = error.message?.toLowerCase() || "";
+      if (msg.includes("already registered") || msg.includes("already exists")) {
+        return fail("conflict", "An account with this email already exists. Try signing in.");
+      }
+      return fail("validation", error.message || "Could not create account.");
+    }
+
+    // Supabase returns empty identities array when email is already registered without throwing
+    if (
+      data.user &&
+      Array.isArray(data.user.identities) &&
+      data.user.identities.length === 0
+    ) {
+      return fail("conflict", "An account with this email already exists. Try signing in.");
+    }
+
+    return ok({
+      email: data.user?.email || email,
+      needsEmailVerification: !data.session,
+    });
+  } catch {
+    return fail("internal", "Registration failed. Please try again.");
+  }
+}
+
 export async function requestLoginCode(input: {
   email: string;
 }): Promise<ActionResult<{ message: string }>> {
@@ -23,11 +155,18 @@ export async function requestLoginCode(input: {
     return fail("validation", "Please enter a valid email address");
   }
 
+  if (!hasSupabaseConfig()) {
+    return fail(
+      "blocked",
+      "Supabase Auth is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to .env.local."
+    );
+  }
+
   const email = parsed.data.email.trim().toLowerCase();
   const ownerEmail = env.OWNER_EMAIL?.trim().toLowerCase();
-  const successMessage = "If this email is allowed, we sent a 6-digit code.";
+  const successMessage = "If this account exists, we sent a 6-digit code.";
 
-  if (ownerEmail && email === ownerEmail) {
+  if (!ownerEmail || email === ownerEmail) {
     try {
       const supabase = await createServerClient();
       await supabase.auth.signInWithOtp({
@@ -53,13 +192,15 @@ export async function verifyLoginCode(input: {
     return fail("validation", "Please enter a valid 6-digit verification code");
   }
 
+  if (!hasSupabaseConfig()) {
+    return fail(
+      "blocked",
+      "Supabase Auth is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to .env.local."
+    );
+  }
+
   const email = parsed.data.email.trim().toLowerCase();
   const ownerEmail = env.OWNER_EMAIL?.trim().toLowerCase();
-
-  // Development convenience bypass if Supabase is unconfigured locally
-  if (!ownerEmail && process.env.NODE_ENV === "development" && parsed.data.code === "123456") {
-    return ok({ email: "owner@rms.local" });
-  }
 
   try {
     const supabase = await createServerClient();
@@ -73,7 +214,7 @@ export async function verifyLoginCode(input: {
       return fail("unauthorized", "That code didn't work. Check it or request a new one.");
     }
 
-    if (data.user.email.toLowerCase() !== ownerEmail) {
+    if (ownerEmail && data.user.email.toLowerCase() !== ownerEmail) {
       await supabase.auth.signOut();
       return fail("unauthorized", "Unauthorized account");
     }

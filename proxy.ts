@@ -5,9 +5,15 @@ import { env } from "@/lib/env";
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  const isAuthPage =
+    pathname === "/login" ||
+    pathname.startsWith("/login/") ||
+    pathname === "/register" ||
+    pathname.startsWith("/register/");
+
   // Static assets, public endpoints, and auth routes are exempt
   const isPublicRoute =
-    pathname.startsWith("/login") ||
+    isAuthPage ||
     pathname.startsWith("/auth") ||
     pathname.startsWith("/api/ingest") ||
     pathname.startsWith("/api/cron") ||
@@ -21,19 +27,29 @@ export async function proxy(request: NextRequest) {
 
   const { supabaseResponse, claims } = await updateSession(request);
 
+  const hasSupabaseConfig = Boolean(
+    env.NEXT_PUBLIC_SUPABASE_URL && env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  );
   const ownerEmail = env.OWNER_EMAIL?.trim().toLowerCase();
   const claimsEmail = (claims as { email?: string } | null)?.email?.toLowerCase();
-  const isAuthenticatedOwner = Boolean(
-    ownerEmail ? claimsEmail === ownerEmail : process.env.NODE_ENV === "development"
+
+  const hasVerifiedSession = Boolean(
+    hasSupabaseConfig &&
+      claimsEmail &&
+      (!ownerEmail || claimsEmail === ownerEmail)
   );
 
-  // If already logged in and visiting /login, redirect to home
-  if (pathname === "/login" && isAuthenticatedOwner) {
+  // Allow local workspace navigation in dev before Supabase Auth env vars are configured
+  const allowDevBypass =
+    !hasSupabaseConfig && !ownerEmail && process.env.NODE_ENV === "development";
+
+  // Redirect authenticated users away from /login or /register to home
+  if (isAuthPage && hasVerifiedSession) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
-  // If protected route and not authenticated, redirect to /login
-  if (!isPublicRoute && !isAuthenticatedOwner) {
+  // If protected route and neither verified session nor dev bypass, redirect to /login
+  if (!isPublicRoute && !hasVerifiedSession && !allowDevBypass) {
     const loginUrl = new URL("/login", request.url);
     if (pathname !== "/") {
       loginUrl.searchParams.set("next", pathname);
