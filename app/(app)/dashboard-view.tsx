@@ -94,7 +94,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
       <div className="relative space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border/80 pb-5">
           <div className="flex items-center gap-3">
-            <BrandLogo className="size-10 p-1.5" />
+            <BrandLogo className="size-9" />
             <div>
               <h1 className="text-xl sm:text-2xl font-black font-display tracking-tight text-foreground">
                 Hi, {displayName}

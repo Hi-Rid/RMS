@@ -19,7 +19,7 @@ export function AuthShell({ children, footerText }: AuthShellProps) {
     <div className="flex min-h-dvh w-full items-center justify-center bg-background p-4 sm:p-6">
       <div className="w-full max-w-sm space-y-5">
         <div className="text-center space-y-1">
-          <BrandLogo className="inline-flex size-12 rounded-xl p-2 mb-2" />
+          <BrandLogo className="inline-block size-12 mb-2" />
           <h1 className="text-3xl font-black tracking-tight text-foreground font-display">
             RMS
           </h1>

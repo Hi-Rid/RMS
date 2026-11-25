@@ -1,7 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
-import { NextResponse } from "next/server";
+import { NextResponse, connection } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import { env } from "@/lib/env";
 import { AppError } from "@/lib/errors";
@@ -33,6 +33,7 @@ export const getOwner = cache(async (): Promise<AuthUser | null> => {
   }
 
   try {
+    await connection();
     const supabase = await createServerClient();
     const { data } = await supabase.auth.getClaims();
     const claims = (data?.claims ?? data) as { sub?: string; email?: string } | null;

@@ -151,7 +151,7 @@ function AppSidebarFrame({
             className="flex items-center gap-2.5 min-w-0 group"
           >
             <BrandLogo
-              className="size-8 transition-colors group-hover:border-foreground/30"
+              className="size-7 shrink-0 transition-transform duration-150 group-hover:scale-105"
               decorative={!collapsed}
             />
             {!collapsed && (

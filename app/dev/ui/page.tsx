@@ -26,7 +26,7 @@ export default function DevUiPage() {
             <header className="space-y-2">
                 <div className="label-mono text-muted-foreground">Design tokens · dev only</div>
                 <div className="flex items-center gap-3">
-                    <BrandLogo className="size-10 p-1.5" />
+                    <BrandLogo className="size-9" />
                     <h1 className="text-display">RMS</h1>
                 </div>
                 <p className="text-muted-foreground">

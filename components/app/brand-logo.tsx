@@ -19,7 +19,7 @@ interface BrandLogoProps {
 export function BrandLogo({
   className,
   svgClassName,
-  framed = true,
+  framed = false,
   decorative = true,
 }: BrandLogoProps) {
   const svg = (
@@ -31,6 +31,7 @@ export function BrandLogo({
       aria-label={decorative ? undefined : "RMS"}
       aria-hidden={decorative ? true : undefined}
       className={cn(
+        "shrink-0",
         framed ? "size-full" : className,
         svgClassName
       )}

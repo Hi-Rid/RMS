@@ -33,28 +33,14 @@ export default function OpenGraphImage() {
             gap: 20,
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 128,
-              height: 128,
-              borderRadius: 24,
-              border: "2px solid #E4E2DC",
-              background: "#FFFFFF",
-              padding: 18,
-            }}
+          <svg
+            width="116"
+            height="110"
+            viewBox="61 97 1145 1074"
+            xmlns="http://www.w3.org/2000/svg"
           >
-            <svg
-              width="92"
-              height="92"
-              viewBox="61 97 1145 1074"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path fill="#800115" fillRule="evenodd" d={RMS_CREST_PATH} />
-            </svg>
-          </div>
+            <path fill="#800115" fillRule="evenodd" d={RMS_CREST_PATH} />
+          </svg>
           <div
             style={{
               display: "flex",
