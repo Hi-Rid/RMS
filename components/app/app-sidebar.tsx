@@ -397,21 +397,12 @@ function NavItem({
         "relative flex items-center rounded-xl text-[13px] transition-colors min-h-[36px]",
         collapsed ? "justify-center px-0 py-1.5" : "justify-between px-3 py-1.5",
         isActive
-          ? "bg-secondary text-foreground font-semibold"
+          ? "bg-[#800115]/[0.07] text-[#800115] font-semibold"
           : "text-muted-foreground font-medium hover:bg-secondary/60 hover:text-foreground"
       )}
     >
-      {isActive && !collapsed && (
-        <span
-          aria-hidden="true"
-          className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-[#800115]"
-        />
-      )}
-
       <div className={cn("flex items-center min-w-0", collapsed ? "justify-center" : "gap-3")}>
-        <span className={cn("shrink-0 transition-colors", isActive && "text-[#800115]")}>
-          {icon}
-        </span>
+        <span className="shrink-0">{icon}</span>
         {!collapsed && <span className="truncate">{label}</span>}
       </div>
 
