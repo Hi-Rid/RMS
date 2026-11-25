@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Quote,
   Hash,
@@ -25,6 +26,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createSnippet, updateSnippet, deleteSnippet, markSnippetUsed } from "@/lib/actions/captions";
 import { toast } from "sonner";
@@ -41,10 +52,15 @@ export function CaptionsClient({
   pillars,
   platforms,
 }: CaptionsClientProps) {
+  const router = useRouter();
   const [snippets, setSnippets] = useState<SnippetItem[]>(initialSnippets);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"caption" | "hashtag_set">("caption");
   const [isPending, startTransition] = useTransition();
+
+  React.useEffect(() => {
+    setSnippets(initialSnippets);
+  }, [initialSnippets]);
 
   // Create Modal State
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -60,6 +76,9 @@ export function CaptionsClient({
   const [editBody, setEditBody] = useState("");
   const [editPillarId, setEditPillarId] = useState("");
   const [editPlatformId, setEditPlatformId] = useState("");
+
+  // Delete Confirmation State
+  const [deletingSnippet, setDeletingSnippet] = useState<SnippetItem | null>(null);
 
   const handleCopy = async (snippet: SnippetItem) => {
     try {
@@ -112,7 +131,7 @@ export function CaptionsClient({
         setNewBody("");
         setNewPillarId("");
         setNewPlatformId("");
-        window.location.reload();
+        router.refresh();
       } else {
         toast.error(res.error.message);
       }
@@ -143,22 +162,24 @@ export function CaptionsClient({
       if (res.ok) {
         toast.success("Snippet updated");
         setEditingSnippet(null);
-        window.location.reload();
+        router.refresh();
       } else {
         toast.error(res.error.message);
       }
     });
   };
 
-  const handleDelete = (s: SnippetItem) => {
-    const confirm = window.confirm(`Delete snippet "${s.title}"?`);
-    if (!confirm) return;
+  const handleDeleteConfirm = () => {
+    if (!deletingSnippet) return;
+    const target = deletingSnippet;
+    setDeletingSnippet(null);
 
     startTransition(async () => {
-      const res = await deleteSnippet(s.id);
+      const res = await deleteSnippet(target.id);
       if (res.ok) {
         toast.success("Snippet deleted");
-        setSnippets((prev) => prev.filter((item) => item.id !== s.id));
+        setSnippets((prev) => prev.filter((item) => item.id !== target.id));
+        router.refresh();
       } else {
         toast.error(res.error.message);
       }
@@ -383,7 +404,7 @@ export function CaptionsClient({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => handleDelete(snippet)}
+                    onClick={() => setDeletingSnippet(snippet)}
                     className="size-7 p-0 text-muted-foreground hover:text-destructive"
                     title="Delete snippet"
                   >
@@ -500,6 +521,29 @@ export function CaptionsClient({
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Delete Snippet Confirmation Dialog */}
+      <AlertDialog
+        open={Boolean(deletingSnippet)}
+        onOpenChange={(open) => {
+          if (!open) setDeletingSnippet(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Snippet?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete &ldquo;{deletingSnippet?.title}&rdquo; from your snippets library.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleDeleteConfirm}>
+              Delete Snippet
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

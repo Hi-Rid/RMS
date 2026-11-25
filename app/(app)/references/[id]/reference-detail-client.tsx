@@ -11,6 +11,17 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   ExternalLink,
   ArrowLeft,
   Plus,
@@ -208,7 +219,6 @@ export function ReferenceDetailClient({
   };
 
   const handleDelete = () => {
-    if (!confirm("Are you sure you want to permanently delete this reference?")) return;
     startTransition(async () => {
       const res = await deleteReferencePermanently({ id: reference.id });
       if (res.ok) {
@@ -525,16 +535,38 @@ export function ReferenceDetailClient({
                 <Archive className="size-3.5" />
                 <span>Archive</span>
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleDelete}
-                disabled={isPending || Boolean(reference.contentId)}
-                className="text-xs font-mono h-8 text-destructive hover:bg-destructive/10 border-destructive/30 gap-1"
-              >
-                <Trash2 className="size-3.5" />
-                <span>Delete</span>
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isPending || Boolean(reference.contentId)}
+                    title={
+                      reference.contentId
+                        ? "Cannot delete: Reference is attached to content"
+                        : "Delete this reference permanently"
+                    }
+                    className="text-xs font-mono h-8 text-destructive hover:bg-destructive/10 border-destructive/30 gap-1"
+                  >
+                    <Trash2 className="size-3.5" />
+                    <span>Delete</span>
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete Reference Permanently?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently deletes the reference and its captured breakdown. You can archive it instead if you may need it later.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction variant="destructive" onClick={handleDelete}>
+                      Delete Permanently
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
 
             <Button

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Music, Plus, Search, Filter, ArrowUpDown, ExternalLink, Disc } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,10 +28,15 @@ export function AudioListClient({
   initialItems,
   initialUnusedOnly = false,
 }: AudioListClientProps) {
+  const router = useRouter();
   const [items, setItems] = useState<AudioListItem[]>(initialItems);
   const [searchText, setSearchText] = useState("");
   const [filterUnused, setFilterUnused] = useState(initialUnusedOnly);
   const [sortBy, setSortBy] = useState<"recent" | "title" | "refs">("recent");
+
+  React.useEffect(() => {
+    setItems(initialItems);
+  }, [initialItems]);
 
   // Create Audio Modal State
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -62,7 +68,7 @@ export function AudioListClient({
         setNewArtist("");
         setNewNotes("");
         setNewIsOriginal(false);
-        window.location.reload();
+        router.refresh();
       } else {
         toast.error(res.error.message);
       }

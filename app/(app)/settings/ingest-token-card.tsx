@@ -4,6 +4,16 @@ import * as React from "react";
 import { Copy, Check, RefreshCw, Key, Smartphone, Terminal, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { rotateIngestToken } from "@/lib/actions/settings";
 
@@ -16,15 +26,10 @@ export function IngestTokenCard({ initialHasToken }: IngestTokenCardProps) {
   const [freshToken, setFreshToken] = React.useState<string | null>(null);
   const [isRotating, setIsRotating] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
+  const [confirmRotateOpen, setConfirmRotateOpen] = React.useState(false);
 
   const handleRotate = async () => {
-    const confirm = window.confirm(
-      hasToken
-        ? "Generating a new token will invalidate your existing token. Any shortcuts using the old token will stop working until updated. Continue?"
-        : "Generate a new Ingest Bearer Token?"
-    );
-    if (!confirm) return;
-
+    setConfirmRotateOpen(false);
     setIsRotating(true);
     try {
       const res = await rotateIngestToken();
@@ -106,7 +111,7 @@ export function IngestTokenCard({ initialHasToken }: IngestTokenCardProps) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleRotate}
+                onClick={() => setConfirmRotateOpen(true)}
                 disabled={isRotating}
                 className="h-8 rounded-md text-xs font-mono uppercase tracking-wider"
               >
@@ -121,7 +126,7 @@ export function IngestTokenCard({ initialHasToken }: IngestTokenCardProps) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleRotate}
+                onClick={() => setConfirmRotateOpen(true)}
                 disabled={isRotating}
                 className="h-7 rounded-md text-[11px] font-mono uppercase tracking-wider text-muted-foreground"
               >
@@ -129,6 +134,27 @@ export function IngestTokenCard({ initialHasToken }: IngestTokenCardProps) {
               </Button>
             </div>
           )}
+
+          <AlertDialog open={confirmRotateOpen} onOpenChange={setConfirmRotateOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {hasToken ? "Rotate Ingest API Token?" : "Generate Ingest API Token?"}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {hasToken
+                    ? "Generating a new token will immediately invalidate your existing token. Any iOS Shortcuts, bookmarklets, or scripts using the old token will stop working until updated."
+                    : "This creates a secret 32-byte Bearer token for iOS Shortcuts and external ingest clients. Copy it right after generation."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction variant={hasToken ? "destructive" : "default"} onClick={handleRotate}>
+                  {hasToken ? "Rotate Token" : "Generate Token"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </CardContent>
       </Card>
 

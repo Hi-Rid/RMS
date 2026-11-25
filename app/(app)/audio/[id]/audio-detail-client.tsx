@@ -8,6 +8,17 @@ import { Music, ArrowLeft, Trash2, Save, ExternalLink, Bookmark, Layers, AlertCi
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { updateAudio, deleteAudio } from "@/lib/actions/audio";
 import { toast } from "sonner";
 
@@ -79,9 +90,6 @@ export function AudioDetailClient({ data }: AudioDetailClientProps) {
       return;
     }
 
-    const confirm = window.confirm(`Delete audio track "${data.audio.title}" permanently?`);
-    if (!confirm) return;
-
     startTransition(async () => {
       const res = await deleteAudio(data.audio.id);
       if (res.ok) {
@@ -105,22 +113,39 @@ export function AudioDetailClient({ data }: AudioDetailClientProps) {
           <span>Back to Audio Library</span>
         </Link>
 
-        {/* Delete Action (PRD §12.12: active only if not used) */}
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!data.canDelete || isPending}
-          onClick={handleDelete}
-          title={
-            data.canDelete
-              ? "Delete this unused track"
-              : "Cannot delete: Audio is in use by references or contents"
-          }
-          className="h-8 text-xs font-mono uppercase tracking-wider text-destructive hover:bg-destructive/10 border-border"
-        >
-          <Trash2 className="size-3.5 mr-1.5" />
-          <span>Delete Track</span>
-        </Button>
+        {/* Delete Action (enabled only if unused) */}
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!data.canDelete || isPending}
+              title={
+                data.canDelete
+                  ? "Delete this unused track"
+                  : "Cannot delete: Audio is in use by references or contents"
+              }
+              className="h-8 text-xs font-mono uppercase tracking-wider text-destructive hover:bg-destructive/10 border-border"
+            >
+              <Trash2 className="size-3.5 mr-1.5" />
+              <span>Delete Track</span>
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Audio Track?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently remove &ldquo;{data.audio.title}&rdquo; from your audio library.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" onClick={handleDelete}>
+                Delete Track
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       {/* Main Edit Card */}

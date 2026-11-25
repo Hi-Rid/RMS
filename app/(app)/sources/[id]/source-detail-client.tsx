@@ -8,6 +8,17 @@ import { Users, ArrowLeft, Trash2, Save, Bookmark, ExternalLink } from "lucide-r
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { updateSourceNotes, deleteSource } from "@/lib/actions/sources";
 import { toast } from "sonner";
 
@@ -63,9 +74,6 @@ export function SourceDetailClient({ data }: SourceDetailClientProps) {
       return;
     }
 
-    const confirm = window.confirm(`Delete creator @${data.source.handle}?`);
-    if (!confirm) return;
-
     startTransition(async () => {
       const res = await deleteSource(data.source.id);
       if (res.ok) {
@@ -89,22 +97,39 @@ export function SourceDetailClient({ data }: SourceDetailClientProps) {
           <span>Back to Sources</span>
         </Link>
 
-        {/* Delete Action (PRD §12.13: enabled only if 0 refs) */}
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!data.canDelete || isPending}
-          onClick={handleDelete}
-          title={
-            data.canDelete
-              ? "Delete this empty creator profile"
-              : "Cannot delete: Creator has active references"
-          }
-          className="h-8 text-xs font-mono uppercase tracking-wider text-destructive hover:bg-destructive/10 border-border"
-        >
-          <Trash2 className="size-3.5 mr-1.5" />
-          <span>Delete Source</span>
-        </Button>
+        {/* Delete Action (enabled only if 0 refs) */}
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!data.canDelete || isPending}
+              title={
+                data.canDelete
+                  ? "Delete this empty creator profile"
+                  : "Cannot delete: Creator has active references"
+              }
+              className="h-8 text-xs font-mono uppercase tracking-wider text-destructive hover:bg-destructive/10 border-border"
+            >
+              <Trash2 className="size-3.5 mr-1.5" />
+              <span>Delete Source</span>
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Source Account?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently remove creator @{data.source.handle} ({data.source.platform.name}).
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" onClick={handleDelete}>
+                Delete Source
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
       {/* Main Source Card */}
