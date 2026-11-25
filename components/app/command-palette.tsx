@@ -7,7 +7,6 @@ import {
   Calendar,
   CheckSquare,
   FilePlus,
-  FolderOpen,
   Home,
   Inbox,
   Layers,
@@ -16,9 +15,7 @@ import {
   Music,
   PlusCircle,
   Quote,
-  Search,
   Settings,
-  Sparkles,
   Users,
 } from "lucide-react";
 import {
@@ -72,11 +69,11 @@ export function CommandPalette({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput placeholder="Type a command, page, or search..." />
+      <CommandInput placeholder="Search commands or jump to a page..." />
       <CommandList>
-        <CommandEmpty>No results found.</CommandEmpty>
+        <CommandEmpty>No matching commands or pages found.</CommandEmpty>
 
-        <CommandGroup heading="Actions">
+        <CommandGroup heading="Quick actions">
           <CommandItem
             onSelect={() =>
               runCommand(() => {
@@ -85,17 +82,17 @@ export function CommandPalette({
               })
             }
           >
-            <PlusCircle className="mr-2 size-4" />
+            <PlusCircle />
             <span>Add links or references</span>
             <CommandShortcut>A</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/contents/new"))}>
-            <FilePlus className="mr-2 size-4" />
+            <FilePlus />
             <span>Create new content</span>
             <CommandShortcut>N</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/inbox/triage"))}>
-            <ListTodo className="mr-2 size-4" />
+            <ListTodo />
             <span>Start triage mode</span>
             <CommandShortcut>T</CommandShortcut>
           </CommandItem>
@@ -103,53 +100,67 @@ export function CommandPalette({
 
         <CommandSeparator />
 
-        <CommandGroup heading="Go to">
+        <CommandGroup heading="Navigation">
           <CommandItem onSelect={() => runCommand(() => router.push("/"))}>
-            <Home className="mr-2 size-4" />
+            <Home />
             <span>Home</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/inbox"))}>
-            <Inbox className="mr-2 size-4" />
+            <Inbox />
             <span>Inbox</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/references"))}>
-            <Bookmark className="mr-2 size-4" />
+            <Bookmark />
             <span>References</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/contents"))}>
-            <Layers className="mr-2 size-4" />
+            <Layers />
             <span>Contents</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/evaluate"))}>
-            <CheckSquare className="mr-2 size-4" />
+            <CheckSquare />
             <span>Evaluate</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/planner"))}>
-            <Calendar className="mr-2 size-4" />
+            <Calendar />
             <span>Planner</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/audio"))}>
-            <Music className="mr-2 size-4" />
+            <Music />
             <span>Audio library</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/sources"))}>
-            <Users className="mr-2 size-4" />
+            <Users />
             <span>Source accounts</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/captions"))}>
-            <Quote className="mr-2 size-4" />
+            <Quote />
             <span>Caption library</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/insight"))}>
-            <LineChart className="mr-2 size-4" />
-            <span>Insight & analytics</span>
+            <LineChart />
+            <span>Analytics</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push("/settings"))}>
-            <Settings className="mr-2 size-4" />
+            <Settings />
             <span>Settings</span>
           </CommandItem>
         </CommandGroup>
       </CommandList>
+
+      <div className="flex items-center justify-between border-t border-border/70 bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1">
+            <kbd className="rounded border border-border/80 bg-background px-1 py-0.5 font-mono text-[10px]">↑↓</kbd>
+            Navigate
+          </span>
+          <span className="flex items-center gap-1">
+            <kbd className="rounded border border-border/80 bg-background px-1 py-0.5 font-mono text-[10px]">↵</kbd>
+            Open
+          </span>
+        </div>
+        <span className="font-mono text-[10px] text-muted-foreground/80">Ctrl+K or /</span>
+      </div>
     </CommandDialog>
   );
 }
