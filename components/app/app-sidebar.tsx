@@ -2,11 +2,14 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   Bookmark,
   Calendar,
   CheckSquare,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Home,
   Inbox,
   Layers,
@@ -17,12 +20,11 @@ import {
   Quote,
   Search,
   Settings,
-  Sparkles,
   Users,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { signOut } from "@/lib/actions/auth";
 import type { SidebarCounts } from "@/lib/queries/home";
 
@@ -31,16 +33,70 @@ interface AppSidebarProps {
   ownerEmail?: string;
   onOpenCommand: () => void;
   onOpenAddLinks: () => void;
+  onNavigate?: () => void;
+  onClose?: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
-export function AppSidebar({
+const PIPELINE_STATUSES = [
+  ["inbox", "Inbox"],
+  ["selected", "Selected"],
+  ["production", "Prod"],
+  ["posted", "Posted"],
+  ["evaluating", "Eval"],
+  ["skipped", "Skip"],
+] as const;
+
+export function AppSidebar(props: AppSidebarProps) {
+  return (
+    <React.Suspense fallback={<AppSidebarFrame {...props} activePillar={null} activeStatus={null} />}>
+      <AppSidebarWithSearch {...props} />
+    </React.Suspense>
+  );
+}
+
+function AppSidebarWithSearch(props: AppSidebarProps) {
+  const searchParams = useSearchParams();
+  const activePillar = searchParams.get("pillar");
+  const activeStatus = searchParams.get("status");
+
+  return (
+    <AppSidebarFrame
+      {...props}
+      activePillar={activePillar}
+      activeStatus={activeStatus}
+    />
+  );
+}
+
+interface AppSidebarFrameProps extends AppSidebarProps {
+  activePillar: string | null;
+  activeStatus: string | null;
+}
+
+function AppSidebarFrame({
   counts,
   ownerEmail = "owner@rms.local",
   onOpenCommand,
   onOpenAddLinks,
-}: AppSidebarProps) {
+  onNavigate,
+  onClose,
+  collapsed = false,
+  onToggleCollapse,
+  activePillar,
+  activeStatus,
+}: AppSidebarFrameProps) {
   const pathname = usePathname();
+  const [pipelineOpen, setPipelineOpen] = React.useState(true);
+  const [pillarsOpen, setPillarsOpen] = React.useState(false);
   const [showAllPillars, setShowAllPillars] = React.useState(false);
+
+  React.useEffect(() => {
+    if (activePillar) {
+      setPillarsOpen(true);
+    }
+  }, [activePillar]);
 
   const orderedPillars = React.useMemo(
     () =>
@@ -50,252 +106,438 @@ export function AppSidebar({
       }),
     [counts.pillars]
   );
-  const visiblePillars = showAllPillars ? orderedPillars : orderedPillars.slice(0, 6);
+
+  const nonZeroPillars = React.useMemo(
+    () => orderedPillars.filter((p) => p.count > 0 || p.slug === activePillar),
+    [orderedPillars, activePillar]
+  );
+
+  const visiblePillars = showAllPillars
+    ? orderedPillars
+    : nonZeroPillars.length > 0
+    ? nonZeroPillars.slice(0, 8)
+    : orderedPillars.slice(0, 6);
 
   const isNavActive = (href: string) => {
     if (href === "/") return pathname === "/";
-    return pathname.startsWith(href);
+    if (href === "/references" && pathname === "/references" && (activeStatus || activePillar)) {
+      return false;
+    }
+    return pathname === href || pathname.startsWith(`${href}/`);
   };
 
+  const totalPipelineRefs =
+    (counts.statuses.inbox ?? 0) +
+    (counts.statuses.selected ?? 0) +
+    (counts.statuses.production ?? 0) +
+    (counts.statuses.posted ?? 0) +
+    (counts.statuses.evaluating ?? 0) +
+    (counts.statuses.skipped ?? 0);
+
   return (
-    <aside className="w-[240px] shrink-0 border-r border-border bg-sidebar flex flex-col h-screen select-none">
-      {/* Brand & Action Header */}
-      <div className="p-4 pb-2 space-y-3">
-        <div className="flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 group">
-            <div className="size-7 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-mono text-xs font-bold tracking-tight">
+    <aside
+      className={cn(
+        "h-full shrink-0 border-r border-sidebar-border bg-sidebar flex flex-col select-none transition-[width] duration-200",
+        collapsed ? "w-[68px]" : "w-full lg:w-[252px]"
+      )}
+    >
+      {/* Top Brand & Action Header */}
+      <div className={cn("p-3.5 pb-2.5 space-y-2.5 border-b border-sidebar-border/70", collapsed && "px-2.5")}>
+        <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-between gap-2")}>
+          <Link
+            href="/"
+            onClick={onNavigate}
+            className="flex items-center gap-2.5 min-w-0 group"
+          >
+            <div className="size-8 shrink-0 rounded-md bg-sidebar-primary text-sidebar-primary-foreground flex items-center justify-center font-mono text-xs font-bold tracking-tight">
               R
             </div>
-            <span className="font-display font-black text-xl tracking-tight text-foreground">
-              RMS
-            </span>
+            {!collapsed && (
+              <div className="flex items-baseline gap-1.5 min-w-0">
+                <span className="font-display font-black text-lg tracking-tight text-foreground">
+                  RMS
+                </span>
+                <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-background border border-border text-muted-foreground">
+                  v2.0
+                </span>
+              </div>
+            )}
           </Link>
-          <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">
-            v2.0
-          </span>
+
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close navigation menu"
+              className="size-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background/80 border border-transparent hover:border-border transition-colors"
+            >
+              <X className="size-4" />
+            </button>
+          ) : (
+            onToggleCollapse &&
+            !collapsed && (
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                title="Collapse sidebar"
+                aria-label="Collapse sidebar"
+                className="hidden lg:flex size-7 rounded-md items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background/80 transition-colors"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+            )
+          )}
         </div>
 
-        {/* Prominent "+ Create / Add link" Action Button */}
+        {collapsed && onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+            className="w-full h-7 rounded-md hidden lg:flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-background/80 transition-colors"
+          >
+            <ChevronRight className="size-4" />
+          </button>
+        )}
+
+        {/* Prominent Add Reference Action Button */}
         <Button
-          onClick={onOpenAddLinks}
-          className="w-full h-[36px] rounded-md bg-primary text-primary-foreground hover:bg-primary/90 font-medium text-xs font-mono uppercase tracking-wider flex items-center justify-center gap-1.5"
+          onClick={() => {
+            onClose?.();
+            onOpenAddLinks();
+          }}
+          title="Add Reference"
+          className={cn(
+            "w-full h-9 rounded-md bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90 font-medium text-xs font-mono uppercase tracking-wider flex items-center justify-center gap-1.5",
+            collapsed && "px-0"
+          )}
         >
-          <Plus className="size-4" />
-          <span>Add Reference</span>
+          <Plus className="size-4 shrink-0" />
+          {!collapsed && <span>Add Reference</span>}
         </Button>
 
-        {/* Quick Search Bar / Command Palette Trigger */}
+        {/* Quick Search / Command Palette Trigger */}
         <button
-          onClick={onOpenCommand}
-          className="w-full h-[32px] rounded-md bg-background border border-border px-2.5 flex items-center justify-between text-xs text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors"
+          type="button"
+          onClick={() => {
+            onClose?.();
+            onOpenCommand();
+          }}
+          title="Search & jump (/)"
+          className={cn(
+            "w-full h-8 rounded-md bg-background border border-border flex items-center text-xs text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors",
+            collapsed ? "justify-center px-0" : "justify-between px-2.5"
+          )}
         >
-          <span className="flex items-center gap-1.5">
+          {collapsed ? (
             <Search className="size-3.5" />
-            <span className="text-xs">Search & jump...</span>
-          </span>
-          <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground border border-border/50">
-            /
-          </kbd>
+          ) : (
+            <>
+              <span className="flex items-center gap-1.5 truncate">
+                <Search className="size-3.5 shrink-0" />
+                <span className="truncate">Search &amp; jump...</span>
+              </span>
+              <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground border border-border/60 shrink-0">
+                /
+              </kbd>
+            </>
+          )}
         </button>
       </div>
 
-      {/* Navigation Sections */}
-      <ScrollArea className="flex-1 px-3 py-2">
-        <div className="space-y-5">
-          {/* Main Navigation */}
-          <div className="space-y-1">
-            <NavItem
-              href="/"
-              icon={<Home className="size-4" />}
-              label="Home"
-              isActive={isNavActive("/")}
-            />
-            <NavItem
-              href="/inbox"
-              icon={<Inbox className="size-4" />}
-              label="Inbox"
-              count={counts.inbox}
-              isActive={isNavActive("/inbox")}
-            />
-          </div>
+      {/* Scrollable Navigation Regions */}
+      <nav
+        aria-label="Primary Sidebar Navigation"
+        className={cn(
+          "flex-1 min-h-0 overflow-y-auto overscroll-contain py-3 space-y-4",
+          collapsed ? "px-2" : "px-3"
+        )}
+      >
+        {/* Overview */}
+        <div className="space-y-0.5">
+          <NavItem
+            href="/"
+            icon={<Home className="size-4" />}
+            label="Home"
+            isActive={isNavActive("/")}
+            collapsed={collapsed}
+            onClick={onNavigate}
+          />
+          <NavItem
+            href="/inbox"
+            icon={<Inbox className="size-4" />}
+            label="Inbox"
+            count={counts.inbox}
+            isActive={isNavActive("/inbox")}
+            collapsed={collapsed}
+            onClick={onNavigate}
+          />
+        </div>
 
-          {/* Library & Content */}
-          <div className="space-y-1">
-            <div className="px-2 pb-1 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-              Content
-            </div>
-            <NavItem
-              href="/references"
-              icon={<Bookmark className="size-4" />}
-              label="References"
-              count={counts.references}
-              isActive={isNavActive("/references")}
-            />
-            <NavItem
-              href="/contents"
-              icon={<Layers className="size-4" />}
-              label="Contents"
-              count={counts.contents}
-              isActive={isNavActive("/contents")}
-            />
-            <NavItem
-              href="/audio"
-              icon={<Music className="size-4" />}
-              label="Audio"
-              count={counts.audio}
-              isActive={isNavActive("/audio")}
-            />
-            <NavItem
-              href="/sources"
-              icon={<Users className="size-4" />}
-              label="Sources"
-              count={counts.sources}
-              isActive={isNavActive("/sources")}
-            />
-          </div>
+        {/* Library & Content */}
+        <div className="space-y-0.5">
+          {!collapsed && <SectionLabel label="Library" />}
+          <NavItem
+            href="/references"
+            icon={<Bookmark className="size-4" />}
+            label="References"
+            count={counts.references}
+            isActive={isNavActive("/references")}
+            collapsed={collapsed}
+            onClick={onNavigate}
+          />
+          <NavItem
+            href="/contents"
+            icon={<Layers className="size-4" />}
+            label="Contents"
+            count={counts.contents}
+            isActive={isNavActive("/contents")}
+            collapsed={collapsed}
+            onClick={onNavigate}
+          />
+          <NavItem
+            href="/audio"
+            icon={<Music className="size-4" />}
+            label="Audio"
+            count={counts.audio}
+            isActive={isNavActive("/audio")}
+            collapsed={collapsed}
+            onClick={onNavigate}
+          />
+          <NavItem
+            href="/sources"
+            icon={<Users className="size-4" />}
+            label="Sources"
+            count={counts.sources}
+            isActive={isNavActive("/sources")}
+            collapsed={collapsed}
+            onClick={onNavigate}
+          />
+        </div>
 
-          {/* Workflow & Ops */}
-          <div className="space-y-1">
-            <div className="px-2 pb-1 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-              Workflow
-            </div>
-            <NavItem
-              href="/evaluate"
-              icon={<CheckSquare className="size-4" />}
-              label="Evaluate"
-              count={counts.evaluate}
-              highlightCount={counts.evaluate > 0}
-              isActive={isNavActive("/evaluate")}
-            />
-            <NavItem
-              href="/planner"
-              icon={<Calendar className="size-4" />}
-              label="Planner"
-              isActive={isNavActive("/planner")}
-            />
-            <NavItem
-              href="/captions"
-              icon={<Quote className="size-4" />}
-              label="Captions"
-              count={counts.captions}
-              isActive={isNavActive("/captions")}
-            />
-          </div>
+        {/* Workflow */}
+        <div className="space-y-0.5">
+          {!collapsed && <SectionLabel label="Workflow" />}
+          <NavItem
+            href="/evaluate"
+            icon={<CheckSquare className="size-4" />}
+            label="Evaluate"
+            count={counts.evaluate}
+            highlightCount={counts.evaluate > 0}
+            isActive={isNavActive("/evaluate")}
+            collapsed={collapsed}
+            onClick={onNavigate}
+          />
+          <NavItem
+            href="/planner"
+            icon={<Calendar className="size-4" />}
+            label="Planner"
+            isActive={isNavActive("/planner")}
+            collapsed={collapsed}
+            onClick={onNavigate}
+          />
+          <NavItem
+            href="/captions"
+            icon={<Quote className="size-4" />}
+            label="Captions"
+            count={counts.captions}
+            isActive={isNavActive("/captions")}
+            collapsed={collapsed}
+            onClick={onNavigate}
+          />
+        </div>
 
-          {/* Insights & Settings */}
-          <div className="space-y-1">
-            <div className="px-2 pb-1 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-              Insights
-            </div>
-            <NavItem
-              href="/insight"
-              icon={<LineChart className="size-4" />}
-              label="Insight"
-              isActive={isNavActive("/insight")}
-            />
-            <NavItem
-              href="/settings"
-              icon={<Settings className="size-4" />}
-              label="Settings"
-              isActive={isNavActive("/settings")}
-            />
-          </div>
+        {/* Analytics & System */}
+        <div className="space-y-0.5">
+          {!collapsed && <SectionLabel label="System" />}
+          <NavItem
+            href="/insight"
+            icon={<LineChart className="size-4" />}
+            label="Insight"
+            isActive={isNavActive("/insight")}
+            collapsed={collapsed}
+            onClick={onNavigate}
+          />
+          <NavItem
+            href="/settings"
+            icon={<Settings className="size-4" />}
+            label="Settings"
+            isActive={isNavActive("/settings")}
+            collapsed={collapsed}
+            onClick={onNavigate}
+          />
+        </div>
 
-          {/* Pillars Group (collapsible, prioritizing pillars with references) */}
-          {orderedPillars.length > 0 && (
-            <div className="space-y-1 pt-2 border-t border-border/60">
-              <div className="flex items-center justify-between px-2 pb-1">
-                <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                  Pillars
+        {/* Pipeline Status (2-column compact chip grid) */}
+        {!collapsed && (
+          <div className="pt-2.5 border-t border-sidebar-border/80 space-y-2">
+            <button
+              type="button"
+              onClick={() => setPipelineOpen((prev) => !prev)}
+              className="w-full px-1.5 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <span className="flex items-center gap-1.5">
+                <span>Pipeline</span>
+                <span className="text-[10px] px-1.5 rounded bg-background border border-border text-foreground tabular-nums">
+                  {totalPipelineRefs}
                 </span>
-                {orderedPillars.length > 6 && (
+              </span>
+              {pipelineOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            </button>
+
+            {pipelineOpen && (
+              <div className="grid grid-cols-2 gap-1">
+                {PIPELINE_STATUSES.map(([statusKey, label]) => {
+                  const isStatusActive =
+                    pathname === "/references" && activeStatus === statusKey;
+                  return (
+                    <Link
+                      key={statusKey}
+                      href={`/references?status=${statusKey}`}
+                      onClick={onNavigate}
+                      className={cn(
+                        "flex items-center justify-between px-2 py-1.5 rounded-md text-[11px] font-mono border transition-colors",
+                        isStatusActive
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground border-sidebar-primary font-bold"
+                          : "bg-background/70 text-foreground/80 border-border/70 hover:bg-background hover:text-foreground hover:border-foreground/30"
+                      )}
+                    >
+                      <span className="truncate">{label}</span>
+                      <span
+                        className={cn(
+                          "text-[10px] tabular-nums ml-1",
+                          isStatusActive ? "text-sidebar-primary-foreground/90" : "text-muted-foreground"
+                        )}
+                      >
+                        {counts.statuses[statusKey] ?? 0}
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Pillars Collapsible Accordion */}
+        {!collapsed && orderedPillars.length > 0 && (
+          <div className="pt-2.5 border-t border-sidebar-border/80 space-y-1.5 pb-2">
+            <button
+              type="button"
+              onClick={() => setPillarsOpen((prev) => !prev)}
+              className="w-full px-1.5 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <span className="flex items-center gap-1.5">
+                <span>Pillars</span>
+                <span className="text-[10px] px-1.5 rounded bg-background border border-border text-foreground tabular-nums">
+                  {orderedPillars.length}
+                </span>
+              </span>
+              {pillarsOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            </button>
+
+            {pillarsOpen && (
+              <div className="space-y-1">
+                {visiblePillars.map((pillar) => {
+                  const isPillarActive =
+                    pathname === "/references" && activePillar === pillar.slug;
+                  return (
+                    <Link
+                      key={pillar.id}
+                      href={`/references?pillar=${pillar.slug}`}
+                      onClick={onNavigate}
+                      className={cn(
+                        "flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors",
+                        isPillarActive
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground font-semibold"
+                          : "text-foreground/80 hover:bg-background/80 hover:text-foreground"
+                      )}
+                    >
+                      <span className="truncate">{pillar.name}</span>
+                      <span
+                        className={cn(
+                          "text-[10px] font-mono tabular-nums",
+                          isPillarActive ? "text-sidebar-primary-foreground/85" : "text-muted-foreground"
+                        )}
+                      >
+                        {pillar.count}
+                      </span>
+                    </Link>
+                  );
+                })}
+
+                {orderedPillars.length > visiblePillars.length || showAllPillars ? (
                   <button
                     type="button"
                     onClick={() => setShowAllPillars((prev) => !prev)}
-                    className="text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
+                    className="w-full text-left px-2.5 py-1 text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    {showAllPillars ? "Less" : `All (${orderedPillars.length})`}
+                    {showAllPillars
+                      ? "Show used only"
+                      : `+ Show all ${orderedPillars.length} pillars`}
                   </button>
-                )}
+                ) : null}
               </div>
-              {visiblePillars.map((pillar) => (
-                <Link
-                  key={pillar.id}
-                  href={`/references?pillar=${pillar.slug}`}
-                  className="flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs text-foreground/80 hover:bg-secondary hover:text-foreground transition-colors"
-                >
-                  <span className="truncate">{pillar.name}</span>
-                  <span className="text-[11px] font-mono text-muted-foreground">{pillar.count}</span>
-                </Link>
-              ))}
-              {orderedPillars.length > 6 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllPillars((prev) => !prev)}
-                  className="w-full text-left px-2.5 py-1 text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {showAllPillars
-                    ? "Show less"
-                    : `+ Show ${orderedPillars.length - 6} more pillars`}
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Statuses Group */}
-          <div className="space-y-1 pt-2 border-t border-border/60 pb-4">
-            <div className="px-2 pb-1 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-              Status
-            </div>
-            {(
-              [
-                ["inbox", "Inbox"],
-                ["selected", "Selected"],
-                ["production", "Production"],
-                ["posted", "Posted"],
-                ["evaluating", "Evaluating"],
-                ["skipped", "Skipped"],
-              ] as const
-            ).map(([statusKey, label]) => (
-              <Link
-                key={statusKey}
-                href={`/references?status=${statusKey}`}
-                className="flex items-center justify-between px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-              >
-                <span>{label}</span>
-                <span className="text-[11px] font-mono">
-                  {counts.statuses[statusKey] ?? 0}
-                </span>
-              </Link>
-            ))}
+            )}
           </div>
-        </div>
-      </ScrollArea>
+        )}
+      </nav>
 
-      {/* User / Profile card at bottom (matching screenshot style) */}
-      <div className="p-3 border-t border-border bg-sidebar">
-        <div className="flex items-center justify-between p-2 rounded-lg bg-background border border-border/80">
-          <div className="flex items-center gap-2 overflow-hidden">
-            <div className="size-7 shrink-0 rounded-md bg-secondary flex items-center justify-center font-mono text-xs font-bold text-foreground">
+      {/* Bottom User Profile Card */}
+      <div className={cn("p-3 border-t border-sidebar-border bg-sidebar shrink-0", collapsed && "p-2")}>
+        {collapsed ? (
+          <div className="flex flex-col items-center gap-2">
+            <div
+              title={ownerEmail}
+              className="size-8 rounded-md bg-background border border-border flex items-center justify-center font-mono text-xs font-bold text-foreground"
+            >
               {ownerEmail.slice(0, 2).toUpperCase()}
             </div>
-            <div className="overflow-hidden">
-              <div className="text-xs font-medium text-foreground truncate" title={ownerEmail}>
-                {ownerEmail}
-              </div>
-              <div className="text-[10px] font-mono text-muted-foreground">Solo Creator</div>
-            </div>
+            <button
+              type="button"
+              onClick={() => signOut()}
+              title="Sign out"
+              aria-label="Sign out"
+              className="size-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-background border border-transparent hover:border-border transition-colors"
+            >
+              <LogOut className="size-4" />
+            </button>
           </div>
-          <button
-            onClick={() => signOut()}
-            title="Sign out"
-            className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-destructive transition-colors"
-          >
-            <LogOut className="size-4" />
-          </button>
-        </div>
+        ) : (
+          <div className="flex items-center justify-between p-2 rounded-lg bg-background border border-border/90 gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="size-8 shrink-0 rounded-md bg-secondary border border-border/70 flex items-center justify-center font-mono text-xs font-bold text-foreground">
+                {ownerEmail.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-medium text-foreground truncate" title={ownerEmail}>
+                  {ownerEmail}
+                </div>
+                <div className="text-[10px] font-mono text-muted-foreground">Solo Creator</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => signOut()}
+              title="Sign out"
+              aria-label="Sign out"
+              className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-destructive transition-colors shrink-0"
+            >
+              <LogOut className="size-4" />
+            </button>
+          </div>
+        )}
       </div>
     </aside>
+  );
+}
+
+function SectionLabel({ label }: { label: string }) {
+  return (
+    <div className="px-2.5 pb-1 pt-0.5 text-[10px] font-mono font-medium uppercase tracking-[0.12em] text-muted-foreground">
+      {label}
+    </div>
   );
 }
 
@@ -306,6 +548,8 @@ function NavItem({
   count,
   highlightCount,
   isActive,
+  collapsed = false,
+  onClick,
 }: {
   href: string;
   icon: React.ReactNode;
@@ -313,34 +557,44 @@ function NavItem({
   count?: number;
   highlightCount?: boolean;
   isActive: boolean;
+  collapsed?: boolean;
+  onClick?: () => void;
 }) {
   return (
     <Link
       href={href}
+      onClick={onClick}
+      title={collapsed ? label : undefined}
       className={cn(
-        "flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors",
+        "relative flex items-center rounded-md text-xs font-medium transition-colors min-h-[34px]",
+        collapsed ? "justify-center px-0 py-1.5" : "justify-between px-2.5 py-1.5",
         isActive
-          ? "bg-primary text-primary-foreground font-semibold"
-          : "text-foreground/80 hover:bg-secondary hover:text-foreground"
+          ? "bg-sidebar-primary text-sidebar-primary-foreground font-semibold"
+          : "text-foreground/80 hover:bg-background/80 hover:text-foreground"
       )}
     >
-      <div className="flex items-center gap-2.5">
-        {icon}
-        <span>{label}</span>
+      <div className={cn("flex items-center min-w-0", collapsed ? "justify-center" : "gap-2.5")}>
+        <span className="shrink-0">{icon}</span>
+        {!collapsed && <span className="truncate">{label}</span>}
       </div>
-      {typeof count === "number" && count > 0 && (
+
+      {!collapsed && typeof count === "number" && count > 0 && (
         <span
           className={cn(
-            "text-[10px] font-mono px-1.5 py-0.5 rounded",
+            "text-[10px] font-mono px-1.5 py-0.5 rounded tabular-nums ml-2 shrink-0",
             isActive
-              ? "bg-primary-foreground/20 text-primary-foreground"
+              ? "bg-sidebar-primary-foreground/20 text-sidebar-primary-foreground"
               : highlightCount
-              ? "bg-destructive/10 text-destructive font-bold"
-              : "bg-secondary text-secondary-foreground"
+              ? "bg-destructive/15 text-destructive font-bold"
+              : "bg-background/90 border border-border/70 text-muted-foreground"
           )}
         >
           {count}
         </span>
+      )}
+
+      {collapsed && highlightCount && (
+        <span className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-destructive" />
       )}
     </Link>
   );
