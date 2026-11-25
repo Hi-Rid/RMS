@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { sourceAccounts, refs } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
@@ -12,16 +12,21 @@ export async function updateSourceNotes(input: {
   id: string;
   notes: string;
 }): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   try {
-    await db
+    const [updated] = await db
       .update(sourceAccounts)
       .set({
         notes: input.notes.trim() || null,
         updatedAt: sql`now()`,
       })
-      .where(eq(sourceAccounts.id, input.id));
+      .where(and(eq(sourceAccounts.id, input.id), eq(sourceAccounts.userId, user.id)))
+      .returning({ id: sourceAccounts.id });
+
+    if (!updated) {
+      return fail("not_found", "Source account not found");
+    }
 
     revalidatePath("/sources");
     revalidatePath(`/sources/${input.id}`);
@@ -33,13 +38,23 @@ export async function updateSourceNotes(input: {
 }
 
 export async function deleteSource(id: string): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   try {
+    const [existing] = await db
+      .select({ id: sourceAccounts.id })
+      .from(sourceAccounts)
+      .where(and(eq(sourceAccounts.id, id), eq(sourceAccounts.userId, user.id)))
+      .limit(1);
+
+    if (!existing) {
+      return fail("not_found", "Source account not found");
+    }
+
     const [countRes] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(refs)
-      .where(eq(refs.sourceAccountId, id));
+      .where(and(eq(refs.sourceAccountId, id), eq(refs.userId, user.id)));
 
     if ((countRes?.count || 0) > 0) {
       return fail(
@@ -48,7 +63,9 @@ export async function deleteSource(id: string): Promise<ActionResult<void>> {
       );
     }
 
-    await db.delete(sourceAccounts).where(eq(sourceAccounts.id, id));
+    await db
+      .delete(sourceAccounts)
+      .where(and(eq(sourceAccounts.id, id), eq(sourceAccounts.userId, user.id)));
     revalidatePath("/sources");
     return ok(undefined);
   } catch (error) {

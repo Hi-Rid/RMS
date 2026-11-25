@@ -1,6 +1,7 @@
 import "server-only";
-import { eq, sql, desc, asc, and, or, isNull } from "drizzle-orm";
+import { eq, sql, desc, and, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { getOwner } from "@/lib/auth/owner";
 import { audios, refs, contents, posts, platforms } from "@/db/schema";
 
 export interface AudioListItem {
@@ -17,6 +18,7 @@ export interface AudioListItem {
 }
 
 export interface ListAudiosParams {
+  userId?: string;
   unusedOnly?: boolean;
   searchText?: string;
   sortBy?: "title" | "recent" | "refs";
@@ -25,8 +27,10 @@ export interface ListAudiosParams {
 export async function listAudios(params: ListAudiosParams = {}): Promise<AudioListItem[]> {
   try {
     const { unusedOnly = false, searchText, sortBy = "recent" } = params;
+    const userId = params.userId ?? (await getOwner())?.id;
+    if (!userId) return [];
 
-    // Fetch all audios with aggregation counts
+    // Fetch all user audios with scoped aggregation counts
     const rows = await db
       .select({
         id: audios.id,
@@ -35,16 +39,17 @@ export async function listAudios(params: ListAudiosParams = {}): Promise<AudioLi
         isOriginal: audios.isOriginal,
         notes: audios.notes,
         createdAt: audios.createdAt,
-        refsCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.audioId} = ${audios.id} AND ${refs.archivedAt} IS NULL)`,
-        contentsCount: sql<number>`(SELECT count(*)::int FROM ${contents} WHERE ${contents.audioId} = ${audios.id} AND ${contents.archivedAt} IS NULL)`,
+        refsCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.audioId} = ${audios.id} AND ${refs.userId} = ${userId} AND ${refs.archivedAt} IS NULL)`,
+        contentsCount: sql<number>`(SELECT count(*)::int FROM ${contents} WHERE ${contents.audioId} = ${audios.id} AND ${contents.userId} = ${userId} AND ${contents.archivedAt} IS NULL)`,
         lastUsedAt: sql<string | null>`(
-          SELECT max(p.posted_at)::text 
+          SELECT max(p.posted_at)::text
           FROM ${posts} p
           JOIN ${contents} c ON c.id = p.content_id
-          WHERE c.audio_id = ${audios.id}
+          WHERE c.audio_id = ${audios.id} AND c.user_id = ${userId}
         )`,
       })
-      .from(audios);
+      .from(audios)
+      .where(eq(audios.userId, userId));
 
     let items: AudioListItem[] = rows.map((r) => ({
       id: r.id,
@@ -59,7 +64,6 @@ export async function listAudios(params: ListAudiosParams = {}): Promise<AudioLi
       createdAt: r.createdAt,
     }));
 
-    // Filter search text
     if (searchText && searchText.trim()) {
       const term = searchText.trim().toLowerCase();
       items = items.filter(
@@ -70,18 +74,15 @@ export async function listAudios(params: ListAudiosParams = {}): Promise<AudioLi
       );
     }
 
-    // Filter unused
     if (unusedOnly) {
       items = items.filter((i) => i.isUnused);
     }
 
-    // Sorting
     if (sortBy === "title") {
       items.sort((a, b) => a.title.localeCompare(b.title));
     } else if (sortBy === "refs") {
       items.sort((a, b) => b.refsCount - a.refsCount);
     } else {
-      // recent: sort by lastUsedAt desc, then createdAt desc
       items.sort((a, b) => {
         if (a.lastUsedAt && b.lastUsedAt) return b.lastUsedAt.localeCompare(a.lastUsedAt);
         if (a.lastUsedAt) return -1;
@@ -97,44 +98,47 @@ export async function listAudios(params: ListAudiosParams = {}): Promise<AudioLi
   }
 }
 
-export async function getAudioById(id: string) {
+export async function getAudioById(id: string, explicitUserId?: string) {
   try {
+    const userId = explicitUserId ?? (await getOwner())?.id;
+    if (!userId) return null;
+
     const [audio] = await db
       .select()
       .from(audios)
-      .where(eq(audios.id, id))
+      .where(and(eq(audios.id, id), eq(audios.userId, userId)))
       .limit(1);
 
     if (!audio) return null;
 
-    // References using this audio
-    const usingRefs = await db
-      .select({
-        id: refs.id,
-        url: refs.url,
-        summary: refs.summary,
-        hookText: refs.hookText,
-        status: refs.status,
-        savedAt: refs.savedAt,
-        platformName: platforms.name,
-      })
-      .from(refs)
-      .innerJoin(platforms, eq(refs.platformId, platforms.id))
-      .where(and(eq(refs.audioId, id), isNull(refs.archivedAt)))
-      .orderBy(desc(refs.savedAt));
+    const [usingRefs, usingContents] = await Promise.all([
+      db
+        .select({
+          id: refs.id,
+          url: refs.url,
+          summary: refs.summary,
+          hookText: refs.hookText,
+          status: refs.status,
+          savedAt: refs.savedAt,
+          platformName: platforms.name,
+        })
+        .from(refs)
+        .innerJoin(platforms, eq(refs.platformId, platforms.id))
+        .where(and(eq(refs.audioId, id), eq(refs.userId, userId), isNull(refs.archivedAt)))
+        .orderBy(desc(refs.savedAt)),
 
-    // Contents using this audio
-    const usingContents = await db
-      .select({
-        id: contents.id,
-        title: contents.title,
-        status: contents.status,
-        createdAt: contents.createdAt,
-        lastPostedAt: sql<string | null>`(SELECT max(posted_at)::text FROM ${posts} WHERE content_id = ${contents.id})`,
-      })
-      .from(contents)
-      .where(and(eq(contents.audioId, id), isNull(contents.archivedAt)))
-      .orderBy(desc(contents.createdAt));
+      db
+        .select({
+          id: contents.id,
+          title: contents.title,
+          status: contents.status,
+          createdAt: contents.createdAt,
+          lastPostedAt: sql<string | null>`(SELECT max(posted_at)::text FROM ${posts} WHERE content_id = ${contents.id})`,
+        })
+        .from(contents)
+        .where(and(eq(contents.audioId, id), eq(contents.userId, userId), isNull(contents.archivedAt)))
+        .orderBy(desc(contents.createdAt)),
+    ]);
 
     return {
       audio,

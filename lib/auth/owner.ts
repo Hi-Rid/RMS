@@ -1,11 +1,20 @@
 import "server-only";
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import { env } from "@/lib/env";
 import { AppError } from "@/lib/errors";
+import { ensureUserWorkspace } from "@/lib/auth/workspace";
 
-export async function getOwner(): Promise<{ email: string } | null> {
+export interface AuthUser {
+  id: string;
+  email: string;
+}
+
+const DEV_FALLBACK_USER_ID = "00000000-0000-0000-0000-000000000000";
+
+export const getOwner = cache(async (): Promise<AuthUser | null> => {
   const ownerEmail = env.OWNER_EMAIL?.trim().toLowerCase();
   const hasSupabaseConfig = Boolean(
     env.NEXT_PUBLIC_SUPABASE_URL && env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
@@ -14,7 +23,7 @@ export async function getOwner(): Promise<{ email: string } | null> {
   // In development before Supabase Auth is configured, keep local DB workspace usable
   if (!hasSupabaseConfig && !ownerEmail) {
     if (process.env.NODE_ENV === "development") {
-      return { email: "owner@rms.local" };
+      return { id: DEV_FALLBACK_USER_ID, email: "owner@rms.local" };
     }
     return null;
   }
@@ -26,26 +35,30 @@ export async function getOwner(): Promise<{ email: string } | null> {
   try {
     const supabase = await createServerClient();
     const { data } = await supabase.auth.getClaims();
-    const claims = (data?.claims ?? data) as { email?: string } | null;
-    const userEmail = claims?.email?.toLowerCase();
+    const claims = (data?.claims ?? data) as { sub?: string; email?: string } | null;
+    const claimsId = claims?.sub;
+    const claimsEmail = claims?.email?.toLowerCase();
 
-    if (userEmail && (!ownerEmail || userEmail === ownerEmail)) {
-      return { email: userEmail };
+    if (claimsId && claimsEmail && (!ownerEmail || claimsEmail === ownerEmail)) {
+      await ensureUserWorkspace(claimsId);
+      return { id: claimsId, email: claimsEmail };
     }
 
     const { data: userData } = await supabase.auth.getUser();
+    const directId = userData?.user?.id;
     const directEmail = userData?.user?.email?.toLowerCase();
-    if (directEmail && (!ownerEmail || directEmail === ownerEmail)) {
-      return { email: directEmail };
+    if (directId && directEmail && (!ownerEmail || directEmail === ownerEmail)) {
+      await ensureUserWorkspace(directId);
+      return { id: directId, email: directEmail };
     }
 
     return null;
   } catch {
     return null;
   }
-}
+});
 
-export async function requirePageOwner(): Promise<{ email: string }> {
+export async function requirePageOwner(): Promise<AuthUser> {
   const owner = await getOwner();
   if (!owner) {
     redirect("/login");
@@ -53,7 +66,7 @@ export async function requirePageOwner(): Promise<{ email: string }> {
   return owner;
 }
 
-export async function requireActionOwner(): Promise<{ email: string }> {
+export async function requireActionOwner(): Promise<AuthUser> {
   const owner = await getOwner();
   if (!owner) {
     throw new AppError("unauthorized", "Unauthorized: authenticated session required");
@@ -61,7 +74,7 @@ export async function requireActionOwner(): Promise<{ email: string }> {
   return owner;
 }
 
-export async function requireRouteOwner(): Promise<{ email: string } | Response> {
+export async function requireRouteOwner(): Promise<AuthUser | Response> {
   const owner = await getOwner();
   if (!owner) {
     return NextResponse.json(

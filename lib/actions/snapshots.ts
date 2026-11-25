@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, withTx } from "@/lib/db";
 import { snapshots, posts } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
@@ -28,7 +28,7 @@ const saveSnapshotSchema = z.object({
 export async function saveSnapshotMetrics(
   input: z.infer<typeof saveSnapshotSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = saveSnapshotSchema.safeParse(input);
   if (!parsed.success) {
@@ -52,7 +52,7 @@ export async function saveSnapshotMetrics(
   } = parsed.data;
 
   return await withTx(async (tx) => {
-    // 1. Fetch snapshot and find contentId
+    // 1. Fetch snapshot and find contentId (scoped to user)
     const [snap] = await tx
       .select({
         id: snapshots.id,
@@ -61,7 +61,13 @@ export async function saveSnapshotMetrics(
       })
       .from(snapshots)
       .innerJoin(posts, eq(snapshots.postId, posts.id))
-      .where(eq(snapshots.id, id))
+      .where(
+        and(
+          eq(snapshots.id, id),
+          eq(snapshots.userId, user.id),
+          eq(posts.userId, user.id)
+        )
+      )
       .limit(1);
 
     if (!snap) return fail("not_found", "Snapshot not found");
@@ -86,7 +92,7 @@ export async function saveSnapshotMetrics(
         filledAt: sql`now()`,
         updatedAt: sql`now()`,
       })
-      .where(eq(snapshots.id, id));
+      .where(and(eq(snapshots.id, id), eq(snapshots.userId, user.id)));
 
     // 3. Recompute content status (advances content and linked refs to "evaluating")
     await recomputeContent(tx, snap.contentId);
@@ -107,7 +113,7 @@ const skipSnapshotSchema = z.object({
 export async function skipSnapshot(
   input: z.infer<typeof skipSnapshotSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = skipSnapshotSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid snapshot ID");
@@ -120,7 +126,13 @@ export async function skipSnapshot(
       })
       .from(snapshots)
       .innerJoin(posts, eq(snapshots.postId, posts.id))
-      .where(eq(snapshots.id, parsed.data.id))
+      .where(
+        and(
+          eq(snapshots.id, parsed.data.id),
+          eq(snapshots.userId, user.id),
+          eq(posts.userId, user.id)
+        )
+      )
       .limit(1);
 
     if (!snap) return fail("not_found", "Snapshot not found");
@@ -132,7 +144,7 @@ export async function skipSnapshot(
         filledAt: sql`now()`,
         updatedAt: sql`now()`,
       })
-      .where(eq(snapshots.id, parsed.data.id));
+      .where(and(eq(snapshots.id, parsed.data.id), eq(snapshots.userId, user.id)));
 
     await recomputeContent(tx, snap.contentId);
 

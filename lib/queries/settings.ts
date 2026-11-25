@@ -1,6 +1,8 @@
 import "server-only";
 import { eq, desc, sql, and } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { getOwner } from "@/lib/auth/owner";
+import { DEFAULT_CHECKLIST } from "@/lib/auth/workspace-defaults";
 import {
   appSettings,
   pillars,
@@ -34,24 +36,36 @@ export interface AppSettingsQuery {
   aiUsedToday: number;
 }
 
-const DEFAULT_CHECKLIST = [
-  "Script / outline",
-  "Shoot or draw",
-  "Edit",
-  "Cover",
-  "Caption and hashtags",
-  "Audio checked",
-];
+const DEFAULT_SETTINGS_RETURN: AppSettingsQuery = {
+  hasToken: false,
+  ingestTokenHint: null,
+  ingestTokenRotatedAt: null,
+  weeklyPostTarget: 3,
+  insightMinSample: 3,
+  defaultChecklist: DEFAULT_CHECKLIST,
+  aiEnabled: true,
+  aiProvider: "google",
+  aiTextModel: "gemini-flash-lite-latest",
+  aiVisionModel: null,
+  aiEmbedModel: null,
+  aiDailyCap: 100,
+  aiOutputLanguage: "id",
+  aiUsedToday: 0,
+};
 
-export async function getAppSettings(): Promise<AppSettingsQuery> {
+export async function getAppSettings(explicitUserId?: string): Promise<AppSettingsQuery> {
   try {
+    const userId = explicitUserId ?? (await getOwner())?.id;
+    if (!userId) return DEFAULT_SETTINGS_RETURN;
+
     const [[settings], [usageTodayRes]] = await Promise.all([
-      db.select().from(appSettings).where(eq(appSettings.id, 1)).limit(1),
+      db.select().from(appSettings).where(eq(appSettings.userId, userId)).limit(1),
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(aiUsage)
         .where(
           and(
+            eq(aiUsage.userId, userId),
             eq(aiUsage.status, "ok"),
             sql`(created_at at time zone 'Asia/Jakarta')::date = (now() at time zone 'Asia/Jakarta')::date`
           )
@@ -80,27 +94,17 @@ export async function getAppSettings(): Promise<AppSettingsQuery> {
     };
   } catch (err) {
     console.warn("Failed to fetch app settings, using defaults:", err);
-    return {
-      hasToken: false,
-      ingestTokenHint: null,
-      ingestTokenRotatedAt: null,
-      weeklyPostTarget: 3,
-      insightMinSample: 3,
-      defaultChecklist: DEFAULT_CHECKLIST,
-      aiEnabled: true,
-      aiProvider: "google",
-      aiTextModel: "gemini-flash-lite-latest",
-      aiVisionModel: null,
-      aiEmbedModel: null,
-      aiDailyCap: 100,
-      aiOutputLanguage: "id",
-      aiUsedToday: 0,
-    };
+    return DEFAULT_SETTINGS_RETURN;
   }
 }
 
-export async function getMasterDataForSettings() {
+export async function getMasterDataForSettings(explicitUserId?: string) {
   try {
+    const userId = explicitUserId ?? (await getOwner())?.id;
+    if (!userId) {
+      return { pillars: [], series: [], formats: [], hookTypes: [], platforms: [] };
+    }
+
     const [
       pillarRows,
       seriesRows,
@@ -117,59 +121,63 @@ export async function getMasterDataForSettings() {
       platformRefCounts,
       platformPostCounts,
     ] = await Promise.all([
-      db.select().from(pillars).orderBy(pillars.sortOrder, pillars.name),
-      db.select().from(series).orderBy(series.sortOrder, series.name),
-      db.select().from(formats).orderBy(formats.sortOrder, formats.name),
-      db.select().from(hookTypes).orderBy(hookTypes.sortOrder, hookTypes.name),
-      db.select().from(platforms).orderBy(platforms.sortOrder, platforms.name),
+      db.select().from(pillars).where(eq(pillars.userId, userId)).orderBy(pillars.sortOrder, pillars.name),
+      db.select().from(series).where(eq(series.userId, userId)).orderBy(series.sortOrder, series.name),
+      db.select().from(formats).where(eq(formats.userId, userId)).orderBy(formats.sortOrder, formats.name),
+      db.select().from(hookTypes).where(eq(hookTypes.userId, userId)).orderBy(hookTypes.sortOrder, hookTypes.name),
+      db.select().from(platforms).where(eq(platforms.userId, userId)).orderBy(platforms.sortOrder, platforms.name),
       db
         .select({ id: refPillars.pillarId, count: sql<number>`count(*)::int` })
         .from(refPillars)
+        .innerJoin(refs, and(eq(refPillars.refId, refs.id), eq(refs.userId, userId)))
         .groupBy(refPillars.pillarId)
         .catch(() => []),
       db
         .select({ id: contentPillars.pillarId, count: sql<number>`count(*)::int` })
         .from(contentPillars)
+        .innerJoin(contents, and(eq(contentPillars.contentId, contents.id), eq(contents.userId, userId)))
         .groupBy(contentPillars.pillarId)
         .catch(() => []),
       db
         .select({ id: contents.seriesId, count: sql<number>`count(*)::int` })
         .from(contents)
-        .where(sql`${contents.seriesId} IS NOT NULL`)
+        .where(and(eq(contents.userId, userId), sql`${contents.seriesId} IS NOT NULL`))
         .groupBy(contents.seriesId)
         .catch(() => []),
       db
         .select({ id: refs.formatId, count: sql<number>`count(*)::int` })
         .from(refs)
-        .where(sql`${refs.formatId} IS NOT NULL`)
+        .where(and(eq(refs.userId, userId), sql`${refs.formatId} IS NOT NULL`))
         .groupBy(refs.formatId)
         .catch(() => []),
       db
         .select({ id: contents.formatId, count: sql<number>`count(*)::int` })
         .from(contents)
-        .where(sql`${contents.formatId} IS NOT NULL`)
+        .where(and(eq(contents.userId, userId), sql`${contents.formatId} IS NOT NULL`))
         .groupBy(contents.formatId)
         .catch(() => []),
       db
         .select({ id: refs.hookTypeId, count: sql<number>`count(*)::int` })
         .from(refs)
-        .where(sql`${refs.hookTypeId} IS NOT NULL`)
+        .where(and(eq(refs.userId, userId), sql`${refs.hookTypeId} IS NOT NULL`))
         .groupBy(refs.hookTypeId)
         .catch(() => []),
       db
         .select({ id: contents.hookTypeId, count: sql<number>`count(*)::int` })
         .from(contents)
-        .where(sql`${contents.hookTypeId} IS NOT NULL`)
+        .where(and(eq(contents.userId, userId), sql`${contents.hookTypeId} IS NOT NULL`))
         .groupBy(contents.hookTypeId)
         .catch(() => []),
       db
         .select({ id: refs.platformId, count: sql<number>`count(*)::int` })
         .from(refs)
+        .where(eq(refs.userId, userId))
         .groupBy(refs.platformId)
         .catch(() => []),
       db
         .select({ id: posts.platformId, count: sql<number>`count(*)::int` })
         .from(posts)
+        .where(eq(posts.userId, userId))
         .groupBy(posts.platformId)
         .catch(() => []),
     ]);
@@ -222,11 +230,15 @@ export async function getMasterDataForSettings() {
   }
 }
 
-export async function getSystemLogs(limit = 200) {
+export async function getSystemLogs(limit = 200, explicitUserId?: string) {
   try {
+    const userId = explicitUserId ?? (await getOwner())?.id;
+    if (!userId) return [];
+
     return await db
       .select()
       .from(systemLogs)
+      .where(eq(systemLogs.userId, userId))
       .orderBy(desc(systemLogs.createdAt))
       .limit(limit);
   } catch (err) {

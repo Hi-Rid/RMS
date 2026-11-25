@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { db, withTx } from "@/lib/db";
-import { refs, refPillars, refElements, sourceAccounts, audios } from "@/db/schema";
+import { refs, refPillars, refElements, sourceAccounts, audios, pillars } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
 import { normalizeUrl, extractUrls } from "@/lib/domain/url";
@@ -45,7 +45,7 @@ export interface ReferenceCreationResult {
 export async function createReferenceFromUrl(
   input: z.infer<typeof createFromUrlSchema>
 ): Promise<ActionResult<ReferenceCreationResult>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = createFromUrlSchema.safeParse(input);
   if (!parsed.success) {
@@ -54,10 +54,11 @@ export async function createReferenceFromUrl(
 
   try {
     const normalized = await normalizeUrl(parsed.data.input);
-    const platformId = await getPlatformIdBySlug(normalized.platform);
-    const formatId = await getFormatIdBySlug(normalized.format);
+    const platformId = await getPlatformIdBySlug(normalized.platform, user.id);
+    const formatId = await getFormatIdBySlug(normalized.format, user.id);
 
     const record = await createReferenceRecord({
+      userId: user.id,
       url: normalized.url,
       urlOriginal: parsed.data.input.trim(),
       platformId,
@@ -97,7 +98,7 @@ export interface BatchItemResult {
 export async function createReferencesFromText(
   input: z.infer<typeof createFromTextSchema>
 ): Promise<ActionResult<{ results: BatchItemResult[]; totalProcessed: number; createdCount: number }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = createFromTextSchema.safeParse(input);
   if (!parsed.success) {
@@ -123,10 +124,11 @@ export async function createReferencesFromText(
   for (const raw of urlsToProcess) {
     try {
       const normalized = await normalizeUrl(raw);
-      const platformId = await getPlatformIdBySlug(normalized.platform);
-      const formatId = await getFormatIdBySlug(normalized.format);
+      const platformId = await getPlatformIdBySlug(normalized.platform, user.id);
+      const formatId = await getFormatIdBySlug(normalized.format, user.id);
 
       const record = await createReferenceRecord({
+        userId: user.id,
         url: normalized.url,
         urlOriginal: raw,
         platformId,
@@ -188,7 +190,7 @@ export async function previewImport(
     items: ImportPreviewItem[];
   }>
 > {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = previewImportSchema.safeParse(input);
   if (!parsed.success) {
@@ -210,9 +212,10 @@ export async function previewImport(
   for (const raw of uniqueUrls) {
     try {
       const normalized = await normalizeUrl(raw);
-      const platformId = await getPlatformIdBySlug(normalized.platform);
+      const platformId = await getPlatformIdBySlug(normalized.platform, user.id);
 
       const existing = await findExistingReference({
+        userId: user.id,
         platformId,
         externalId: normalized.externalId,
         url: normalized.url,
@@ -253,7 +256,7 @@ export async function previewImport(
 export async function importReferencesFromUrls(
   input: z.infer<typeof importUrlsSchema>
 ): Promise<ActionResult<{ created: number; duplicates: number }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = importUrlsSchema.safeParse(input);
   if (!parsed.success) {
@@ -266,10 +269,11 @@ export async function importReferencesFromUrls(
   for (const url of parsed.data.urls) {
     try {
       const normalized = await normalizeUrl(url);
-      const platformId = await getPlatformIdBySlug(normalized.platform);
-      const formatId = await getFormatIdBySlug(normalized.format);
+      const platformId = await getPlatformIdBySlug(normalized.platform, user.id);
+      const formatId = await getFormatIdBySlug(normalized.format, user.id);
 
       const res = await createReferenceRecord({
+        userId: user.id,
         url: normalized.url,
         urlOriginal: url,
         platformId,
@@ -305,7 +309,7 @@ const setStatusSchema = z.object({
 export async function setReferenceStatus(
   input: z.infer<typeof setStatusSchema>
 ): Promise<ActionResult<{ id: string; status: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = setStatusSchema.safeParse(input);
   if (!parsed.success) {
@@ -315,7 +319,7 @@ export async function setReferenceStatus(
   const [ref] = await db
     .select({ id: refs.id, status: refs.status, contentId: refs.contentId })
     .from(refs)
-    .where(eq(refs.id, parsed.data.id))
+    .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)))
     .limit(1);
 
   if (!ref) {
@@ -332,7 +336,7 @@ export async function setReferenceStatus(
       status: parsed.data.status,
       statusChangedAt: sql`now()`,
     })
-    .where(eq(refs.id, parsed.data.id));
+    .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)));
 
   revalidatePath("/");
   revalidatePath("/inbox");
@@ -354,7 +358,7 @@ const skipSchema = z.object({
 export async function skipReference(
   input: z.infer<typeof skipSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = skipSchema.safeParse(input);
   if (!parsed.success) {
@@ -364,7 +368,7 @@ export async function skipReference(
   const [ref] = await db
     .select({ id: refs.id, status: refs.status, contentId: refs.contentId })
     .from(refs)
-    .where(eq(refs.id, parsed.data.id))
+    .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)))
     .limit(1);
 
   if (!ref) {
@@ -382,7 +386,7 @@ export async function skipReference(
       skippedReason: parsed.data.reason?.trim() || null,
       statusChangedAt: sql`now()`,
     })
-    .where(eq(refs.id, parsed.data.id));
+    .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)));
 
   revalidatePath("/");
   revalidatePath("/inbox");
@@ -403,21 +407,26 @@ const unskipSchema = z.object({
 export async function unskipReference(
   input: z.infer<typeof unskipSchema>
 ): Promise<ActionResult<{ id: string; status: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = unskipSchema.safeParse(input);
   if (!parsed.success) {
     return fail("validation", "Invalid parameters");
   }
 
-  await db
+  const [updated] = await db
     .update(refs)
     .set({
       status: parsed.data.to,
       skippedReason: null,
       statusChangedAt: sql`now()`,
     })
-    .where(eq(refs.id, parsed.data.id));
+    .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)))
+    .returning({ id: refs.id });
+
+  if (!updated) {
+    return fail("not_found", "Reference not found");
+  }
 
   revalidatePath("/");
   revalidatePath("/inbox");
@@ -436,15 +445,18 @@ const idSchema = z.object({
 export async function archiveReference(
   input: z.infer<typeof idSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = idSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid ID");
 
-  await db
+  const [updated] = await db
     .update(refs)
     .set({ archivedAt: sql`now()` })
-    .where(eq(refs.id, parsed.data.id));
+    .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)))
+    .returning({ id: refs.id });
+
+  if (!updated) return fail("not_found", "Reference not found");
 
   revalidatePath("/");
   revalidatePath("/inbox");
@@ -459,15 +471,18 @@ export async function archiveReference(
 export async function restoreReference(
   input: z.infer<typeof idSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = idSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid ID");
 
-  await db
+  const [updated] = await db
     .update(refs)
     .set({ archivedAt: null })
-    .where(eq(refs.id, parsed.data.id));
+    .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)))
+    .returning({ id: refs.id });
+
+  if (!updated) return fail("not_found", "Reference not found");
 
   revalidatePath("/");
   revalidatePath("/inbox");
@@ -482,7 +497,7 @@ export async function restoreReference(
 export async function deleteReferencePermanently(
   input: z.infer<typeof idSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = idSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid ID");
@@ -490,7 +505,7 @@ export async function deleteReferencePermanently(
   const [ref] = await db
     .select({ id: refs.id, contentId: refs.contentId })
     .from(refs)
-    .where(eq(refs.id, parsed.data.id))
+    .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)))
     .limit(1);
 
   if (!ref) return fail("not_found", "Reference not found");
@@ -498,7 +513,9 @@ export async function deleteReferencePermanently(
     return fail("blocked", "Cannot delete reference that is linked to content");
   }
 
-  await db.delete(refs).where(eq(refs.id, parsed.data.id));
+  await db
+    .delete(refs)
+    .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)));
 
   revalidatePath("/");
   revalidatePath("/inbox");
@@ -528,7 +545,7 @@ const saveCaptureSchema = z.object({
 export async function saveCapture(
   input: z.infer<typeof saveCaptureSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = saveCaptureSchema.safeParse(input);
   if (!parsed.success) {
@@ -551,7 +568,7 @@ export async function saveCapture(
   } = parsed.data;
 
   return await withTx(async (tx) => {
-    // 1. Fetch current ref
+    // 1. Fetch current ref scoped to user
     const [currentRef] = await tx
       .select({
         id: refs.id,
@@ -559,7 +576,7 @@ export async function saveCapture(
         url: refs.url,
       })
       .from(refs)
-      .where(eq(refs.id, id))
+      .where(and(eq(refs.id, id), eq(refs.userId, user.id)))
       .limit(1);
 
     if (!currentRef) return fail("not_found", "Reference not found");
@@ -574,6 +591,7 @@ export async function saveCapture(
           .from(sourceAccounts)
           .where(
             and(
+              eq(sourceAccounts.userId, user.id),
               eq(sourceAccounts.platformId, currentRef.platformId),
               eq(sourceAccounts.handle, cleanHandle)
             )
@@ -586,6 +604,7 @@ export async function saveCapture(
           const [createdSource] = await tx
             .insert(sourceAccounts)
             .values({
+              userId: user.id,
               platformId: currentRef.platformId,
               handle: cleanHandle,
             })
@@ -606,6 +625,7 @@ export async function saveCapture(
         .from(audios)
         .where(
           and(
+            eq(audios.userId, user.id),
             sql`lower(btrim(${audios.title})) = lower(btrim(${cleanTitle}))`,
             sql`lower(btrim(${audios.artist})) = lower(btrim(${cleanArtist}))`
           )
@@ -618,6 +638,7 @@ export async function saveCapture(
         const [createdAudio] = await tx
           .insert(audios)
           .values({
+            userId: user.id,
             title: cleanTitle,
             artist: cleanArtist,
           })
@@ -655,18 +676,27 @@ export async function saveCapture(
     if (notes !== undefined) updateValues.notes = notes;
     if (summary !== undefined) updateValues.summary = summary;
 
-    await tx.update(refs).set(updateValues).where(eq(refs.id, id));
+    await tx
+      .update(refs)
+      .set(updateValues)
+      .where(and(eq(refs.id, id), eq(refs.userId, user.id)));
 
-    // 7. Sync pillars if provided
+    // 7. Sync pillars if provided (scoped to current user's pillars)
     if (pillarIds) {
       await tx.delete(refPillars).where(eq(refPillars.refId, id));
       if (pillarIds.length > 0) {
-        await tx.insert(refPillars).values(
-          pillarIds.map((pId) => ({
-            refId: id,
-            pillarId: pId,
-          }))
-        );
+        const ownedPillars = await tx
+          .select({ id: pillars.id })
+          .from(pillars)
+          .where(and(eq(pillars.userId, user.id), inArray(pillars.id, pillarIds)));
+        if (ownedPillars.length > 0) {
+          await tx.insert(refPillars).values(
+            ownedPillars.map((p) => ({
+              refId: id,
+              pillarId: p.id,
+            }))
+          );
+        }
       }
     }
 
@@ -694,7 +724,7 @@ const saveBedahSchema = z.object({
 export async function saveBedah(
   input: z.infer<typeof saveBedahSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = saveBedahSchema.safeParse(input);
   if (!parsed.success) {
@@ -704,6 +734,16 @@ export async function saveBedah(
   const { id, hookText, hookTypeId, visualNotes, notes, elements } = parsed.data;
 
   return await withTx(async (tx) => {
+    const [existing] = await tx
+      .select({ id: refs.id })
+      .from(refs)
+      .where(and(eq(refs.id, id), eq(refs.userId, user.id)))
+      .limit(1);
+
+    if (!existing) {
+      return fail("not_found", "Reference not found");
+    }
+
     const updateValues: Record<string, any> = {};
     if (hookText !== undefined) updateValues.hookText = hookText;
     if (hookTypeId !== undefined) updateValues.hookTypeId = hookTypeId;
@@ -711,7 +751,10 @@ export async function saveBedah(
     if (notes !== undefined) updateValues.notes = notes;
 
     if (Object.keys(updateValues).length > 0) {
-      await tx.update(refs).set(updateValues).where(eq(refs.id, id));
+      await tx
+        .update(refs)
+        .set(updateValues)
+        .where(and(eq(refs.id, id), eq(refs.userId, user.id)));
     }
 
     if (elements) {

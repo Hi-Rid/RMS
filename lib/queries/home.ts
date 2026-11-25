@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { sql, eq, and, isNull, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { getOwner } from "@/lib/auth/owner";
 import {
   refs,
   contents,
@@ -55,8 +56,11 @@ const defaultCounts: SidebarCounts = {
   },
 };
 
-export const getSidebarCounts = cache(async (): Promise<SidebarCounts> => {
+export const getSidebarCounts = cache(async (explicitUserId?: string): Promise<SidebarCounts> => {
   try {
+    const userId = explicitUserId ?? (await getOwner())?.id;
+    if (!userId) return defaultCounts;
+
     const [
       statusCountsQuery,
       contentCountRes,
@@ -73,14 +77,14 @@ export const getSidebarCounts = cache(async (): Promise<SidebarCounts> => {
           count: sql<number>`count(*)::int`,
         })
         .from(refs)
-        .where(isNull(refs.archivedAt))
+        .where(and(eq(refs.userId, userId), isNull(refs.archivedAt)))
         .groupBy(refs.status)
         .catch(() => []),
 
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(contents)
-        .where(isNull(contents.archivedAt))
+        .where(and(eq(contents.userId, userId), isNull(contents.archivedAt)))
         .catch(() => [{ count: 0 }]),
 
       db
@@ -88,15 +92,30 @@ export const getSidebarCounts = cache(async (): Promise<SidebarCounts> => {
         .from(snapshots)
         .where(
           and(
+            eq(snapshots.userId, userId),
             eq(snapshots.status, "pending"),
             sql`${snapshots.dueAt} <= now()`
           )
         )
         .catch(() => [{ count: 0 }]),
 
-      db.select({ count: sql<number>`count(*)::int` }).from(audios).catch(() => [{ count: 0 }]),
-      db.select({ count: sql<number>`count(*)::int` }).from(sourceAccounts).catch(() => [{ count: 0 }]),
-      db.select({ count: sql<number>`count(*)::int` }).from(snippets).catch(() => [{ count: 0 }]),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(audios)
+        .where(eq(audios.userId, userId))
+        .catch(() => [{ count: 0 }]),
+
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(sourceAccounts)
+        .where(eq(sourceAccounts.userId, userId))
+        .catch(() => [{ count: 0 }]),
+
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(snippets)
+        .where(eq(snippets.userId, userId))
+        .catch(() => [{ count: 0 }]),
 
       db
         .select({
@@ -106,7 +125,7 @@ export const getSidebarCounts = cache(async (): Promise<SidebarCounts> => {
           sortOrder: pillars.sortOrder,
         })
         .from(pillars)
-        .where(eq(pillars.isActive, true))
+        .where(and(eq(pillars.userId, userId), eq(pillars.isActive, true)))
         .orderBy(pillars.sortOrder)
         .catch(() => []),
 
@@ -116,7 +135,10 @@ export const getSidebarCounts = cache(async (): Promise<SidebarCounts> => {
           count: sql<number>`count(*)::int`,
         })
         .from(refPillars)
-        .innerJoin(refs, and(eq(refPillars.refId, refs.id), isNull(refs.archivedAt)))
+        .innerJoin(
+          refs,
+          and(eq(refPillars.refId, refs.id), eq(refs.userId, userId), isNull(refs.archivedAt))
+        )
         .groupBy(refPillars.pillarId)
         .catch(() => []),
     ]);
@@ -196,20 +218,27 @@ const defaultHomeData: HomeData = {
   activeContents: [],
 };
 
-export const getHomeData = cache(async (): Promise<HomeData> => {
+export const getHomeData = cache(async (explicitUserId?: string): Promise<HomeData> => {
   try {
+    const userId = explicitUserId ?? (await getOwner())?.id;
+    if (!userId) return defaultHomeData;
+
     const [counts, settingsQuery, weeklyPostsRes, recentRefsQuery, activeContentsQuery] = await Promise.all([
-      getSidebarCounts(),
+      getSidebarCounts(userId),
       db
         .select({ weeklyPostTarget: appSettings.weeklyPostTarget })
         .from(appSettings)
+        .where(eq(appSettings.userId, userId))
         .limit(1)
         .catch(() => []),
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(posts)
         .where(
-          sql`posted_at >= date_trunc('week', now() at time zone 'Asia/Jakarta') at time zone 'Asia/Jakarta'`
+          and(
+            eq(posts.userId, userId),
+            sql`posted_at >= date_trunc('week', now() at time zone 'Asia/Jakarta') at time zone 'Asia/Jakarta'`
+          )
         )
         .catch(() => [{ count: 0 }]),
       db
@@ -221,7 +250,7 @@ export const getHomeData = cache(async (): Promise<HomeData> => {
           savedAt: refs.savedAt,
         })
         .from(refs)
-        .where(isNull(refs.archivedAt))
+        .where(and(eq(refs.userId, userId), isNull(refs.archivedAt)))
         .orderBy(sql`${refs.savedAt} desc`)
         .limit(6)
         .catch(() => []),
@@ -233,7 +262,13 @@ export const getHomeData = cache(async (): Promise<HomeData> => {
         })
         .from(contents)
         .leftJoin(formats, eq(contents.formatId, formats.id))
-        .where(and(eq(contents.status, "production"), isNull(contents.archivedAt)))
+        .where(
+          and(
+            eq(contents.userId, userId),
+            eq(contents.status, "production"),
+            isNull(contents.archivedAt)
+          )
+        )
         .orderBy(desc(contents.updatedAt))
         .limit(4)
         .catch(() => []),

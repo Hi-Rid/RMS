@@ -1,5 +1,6 @@
 import "server-only";
 import { NextResponse } from "next/server";
+import { eq, inArray } from "drizzle-orm";
 import { requireRouteOwner } from "@/lib/auth/owner";
 import { db } from "@/lib/db";
 import {
@@ -28,6 +29,8 @@ export async function GET() {
     return auth;
   }
 
+  const userId = auth.id;
+
   try {
     const [
       platformsData,
@@ -39,30 +42,39 @@ export async function GET() {
       audiosData,
       sourceAccountsData,
       refsData,
-      refPillarsData,
-      refImagesData,
       contentsData,
-      contentPillarsData,
       postsData,
       snapshotsData,
       snippetsData,
     ] = await Promise.all([
-      db.select().from(platforms),
-      db.select().from(formats),
-      db.select().from(series),
-      db.select().from(hookTypes),
-      db.select().from(pillars),
-      db.select().from(appSettings),
-      db.select().from(audios),
-      db.select().from(sourceAccounts),
-      db.select().from(refs),
-      db.select().from(refPillars),
-      db.select().from(refImages),
-      db.select().from(contents),
-      db.select().from(contentPillars),
-      db.select().from(posts),
-      db.select().from(snapshots),
-      db.select().from(snippets),
+      db.select().from(platforms).where(eq(platforms.userId, userId)),
+      db.select().from(formats).where(eq(formats.userId, userId)),
+      db.select().from(series).where(eq(series.userId, userId)),
+      db.select().from(hookTypes).where(eq(hookTypes.userId, userId)),
+      db.select().from(pillars).where(eq(pillars.userId, userId)),
+      db.select().from(appSettings).where(eq(appSettings.userId, userId)),
+      db.select().from(audios).where(eq(audios.userId, userId)),
+      db.select().from(sourceAccounts).where(eq(sourceAccounts.userId, userId)),
+      db.select().from(refs).where(eq(refs.userId, userId)),
+      db.select().from(contents).where(eq(contents.userId, userId)),
+      db.select().from(posts).where(eq(posts.userId, userId)),
+      db.select().from(snapshots).where(eq(snapshots.userId, userId)),
+      db.select().from(snippets).where(eq(snippets.userId, userId)),
+    ]);
+
+    const refIds = refsData.map((r) => r.id);
+    const contentIds = contentsData.map((c) => c.id);
+
+    const [refPillarsData, refImagesData, contentPillarsData] = await Promise.all([
+      refIds.length > 0
+        ? db.select().from(refPillars).where(inArray(refPillars.refId, refIds))
+        : Promise.resolve([]),
+      refIds.length > 0
+        ? db.select().from(refImages).where(inArray(refImages.refId, refIds))
+        : Promise.resolve([]),
+      contentIds.length > 0
+        ? db.select().from(contentPillars).where(inArray(contentPillars.contentId, contentIds))
+        : Promise.resolve([]),
     ]);
 
     // PRD §9.5: exclude embedding columns from refs
@@ -99,6 +111,7 @@ export async function GET() {
 
     // Audit log (respects system_logs_kind_check constraint)
     await db.insert(systemLogs).values({
+      userId,
       kind: "import",
       level: "info",
       message: `Database backup exported by owner (${dateStr})`,

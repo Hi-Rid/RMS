@@ -1,5 +1,7 @@
+import "server-only";
 import { eq, and, sql, desc, asc } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { getOwner } from "@/lib/auth/owner";
 import { snapshots, posts, contents, platforms } from "@/db/schema";
 
 export interface SnapshotItem {
@@ -35,11 +37,12 @@ export interface SnapshotItem {
 }
 
 export interface ListSnapshotsParams {
+  userId?: string;
   filter?: "due" | "upcoming" | "done" | "all";
 }
 
 /**
- * Retrieves snapshot checkpoints filtered by due, upcoming, or completed status.
+ * Retrieves snapshot checkpoints for the active user filtered by due, upcoming, or completed status.
  */
 export async function listSnapshots(params: ListSnapshotsParams = {}): Promise<{
   items: SnapshotItem[];
@@ -47,93 +50,103 @@ export async function listSnapshots(params: ListSnapshotsParams = {}): Promise<{
 }> {
   try {
     const { filter = "due" } = params;
+    const userId = params.userId ?? (await getOwner())?.id;
+    if (!userId) return { items: [], counts: { due: 0, upcoming: 0, done: 0 } };
 
-  // Query counts for tabs
-  const [dueCountRes, upcomingCountRes, doneCountRes] = await Promise.all([
-    db
-      .select({ count: sql<number>`count(*)::int` })
+    const [dueCountRes, upcomingCountRes, doneCountRes] = await Promise.all([
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(snapshots)
+        .where(
+          and(
+            eq(snapshots.userId, userId),
+            eq(snapshots.status, "pending"),
+            sql`${snapshots.dueAt} <= now()`
+          )
+        ),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(snapshots)
+        .where(
+          and(
+            eq(snapshots.userId, userId),
+            eq(snapshots.status, "pending"),
+            sql`${snapshots.dueAt} > now()`
+          )
+        ),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(snapshots)
+        .where(and(eq(snapshots.userId, userId), eq(snapshots.status, "done"))),
+    ]);
+
+    const counts = {
+      due: dueCountRes[0]?.count || 0,
+      upcoming: upcomingCountRes[0]?.count || 0,
+      done: doneCountRes[0]?.count || 0,
+    };
+
+    const conditions = [eq(snapshots.userId, userId)];
+    if (filter === "due") {
+      conditions.push(eq(snapshots.status, "pending"));
+      conditions.push(sql`${snapshots.dueAt} <= now()`);
+    } else if (filter === "upcoming") {
+      conditions.push(eq(snapshots.status, "pending"));
+      conditions.push(sql`${snapshots.dueAt} > now()`);
+    } else if (filter === "done") {
+      conditions.push(eq(snapshots.status, "done"));
+    }
+
+    const rows = await db
+      .select({
+        snapshot: snapshots,
+        post: posts,
+        content: contents,
+        platform: platforms,
+      })
       .from(snapshots)
-      .where(and(eq(snapshots.status, "pending"), sql`${snapshots.dueAt} <= now()`)),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(snapshots)
-      .where(and(eq(snapshots.status, "pending"), sql`${snapshots.dueAt} > now()`)),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(snapshots)
-      .where(eq(snapshots.status, "done")),
-  ]);
+      .innerJoin(posts, eq(snapshots.postId, posts.id))
+      .innerJoin(contents, eq(posts.contentId, contents.id))
+      .innerJoin(platforms, eq(posts.platformId, platforms.id))
+      .where(and(...conditions))
+      .orderBy(filter === "done" ? desc(snapshots.filledAt) : asc(snapshots.dueAt))
+      .limit(50);
 
-  const counts = {
-    due: dueCountRes[0]?.count || 0,
-    upcoming: upcomingCountRes[0]?.count || 0,
-    done: doneCountRes[0]?.count || 0,
-  };
-
-  // Conditions for list query
-  const conditions = [];
-  if (filter === "due") {
-    conditions.push(eq(snapshots.status, "pending"));
-    conditions.push(sql`${snapshots.dueAt} <= now()`);
-  } else if (filter === "upcoming") {
-    conditions.push(eq(snapshots.status, "pending"));
-    conditions.push(sql`${snapshots.dueAt} > now()`);
-  } else if (filter === "done") {
-    conditions.push(eq(snapshots.status, "done"));
-  }
-
-  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-
-  const rows = await db
-    .select({
-      snapshot: snapshots,
-      post: posts,
-      content: contents,
-      platform: platforms,
-    })
-    .from(snapshots)
-    .innerJoin(posts, eq(snapshots.postId, posts.id))
-    .innerJoin(contents, eq(posts.contentId, contents.id))
-    .innerJoin(platforms, eq(posts.platformId, platforms.id))
-    .where(whereClause)
-    .orderBy(filter === "done" ? desc(snapshots.filledAt) : asc(snapshots.dueAt))
-    .limit(50);
-
-  const items: SnapshotItem[] = rows.map((r) => ({
-    id: r.snapshot.id,
-    checkpoint: r.snapshot.checkpoint,
-    dueAt: r.snapshot.dueAt,
-    status: r.snapshot.status,
-    views: r.snapshot.views,
-    likes: r.snapshot.likes,
-    comments: r.snapshot.comments,
-    shares: r.snapshot.shares,
-    saves: r.snapshot.saves,
-    reach: r.snapshot.reach,
-    followerDelta: r.snapshot.followerDelta,
-    profileVisits: r.snapshot.profileVisits,
-    avgWatchSeconds: r.snapshot.avgWatchSeconds,
-    retentionPct: r.snapshot.retentionPct,
-    rating: r.snapshot.rating,
-    notes: r.snapshot.notes,
-    filledAt: r.snapshot.filledAt,
-    post: {
-      id: r.post.id,
-      url: r.post.url,
-      caption: r.post.caption,
-      postedAt: r.post.postedAt,
-      platform: {
-        id: r.platform.id,
-        name: r.platform.name,
-        slug: r.platform.slug,
+    const items: SnapshotItem[] = rows.map((r) => ({
+      id: r.snapshot.id,
+      checkpoint: r.snapshot.checkpoint,
+      dueAt: r.snapshot.dueAt,
+      status: r.snapshot.status,
+      views: r.snapshot.views,
+      likes: r.snapshot.likes,
+      comments: r.snapshot.comments,
+      shares: r.snapshot.shares,
+      saves: r.snapshot.saves,
+      reach: r.snapshot.reach,
+      followerDelta: r.snapshot.followerDelta,
+      profileVisits: r.snapshot.profileVisits,
+      avgWatchSeconds: r.snapshot.avgWatchSeconds,
+      retentionPct: r.snapshot.retentionPct,
+      rating: r.snapshot.rating,
+      notes: r.snapshot.notes,
+      filledAt: r.snapshot.filledAt,
+      post: {
+        id: r.post.id,
+        url: r.post.url,
+        caption: r.post.caption,
+        postedAt: r.post.postedAt,
+        platform: {
+          id: r.platform.id,
+          name: r.platform.name,
+          slug: r.platform.slug,
+        },
       },
-    },
-    content: {
-      id: r.content.id,
-      title: r.content.title,
-      status: r.content.status,
-    },
-  }));
+      content: {
+        id: r.content.id,
+        title: r.content.title,
+        status: r.content.status,
+      },
+    }));
 
     return { items, counts };
   } catch (error) {

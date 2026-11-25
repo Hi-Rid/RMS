@@ -1,5 +1,7 @@
+import "server-only";
 import { eq, and, sql, or, isNull, desc, asc, ne, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { getOwner } from "@/lib/auth/owner";
 import {
   contents,
   formats,
@@ -42,6 +44,7 @@ export interface ContentListItem {
 }
 
 export interface ListContentsParams {
+  userId?: string;
   status?: string;
   pillarSlug?: string;
   formatSlug?: string;
@@ -53,7 +56,7 @@ export interface ListContentsParams {
 }
 
 /**
- * Lists contents with filters, relations, and counts.
+ * Lists contents scoped to userId with filters, relations, and counts.
  */
 export async function listContents(params: ListContentsParams = {}): Promise<{
   items: ContentListItem[];
@@ -71,189 +74,188 @@ export async function listContents(params: ListContentsParams = {}): Promise<{
       offset = 0,
     } = params;
 
-  const conditions = [];
+    const userId = params.userId ?? (await getOwner())?.id;
+    if (!userId) return { items: [], total: 0 };
 
-  if (archived) {
-    conditions.push(sql`${contents.archivedAt} IS NOT NULL`);
-  } else {
-    conditions.push(isNull(contents.archivedAt));
-  }
+    const conditions = [eq(contents.userId, userId)];
 
-  if (status && status !== "all") {
-    conditions.push(eq(contents.status, status as any));
-  }
+    if (archived) {
+      conditions.push(sql`${contents.archivedAt} IS NOT NULL`);
+    } else {
+      conditions.push(isNull(contents.archivedAt));
+    }
 
-  if (formatSlug && formatSlug !== "all") {
-    conditions.push(eq(formats.slug, formatSlug));
-  }
+    if (status && status !== "all") {
+      conditions.push(eq(contents.status, status as any));
+    }
 
-  if (seriesId && seriesId !== "all") {
-    conditions.push(eq(contents.seriesId, seriesId));
-  }
+    if (formatSlug && formatSlug !== "all") {
+      conditions.push(eq(formats.slug, formatSlug));
+    }
 
-  if (searchText && searchText.trim()) {
-    const term = `%${searchText.trim().toLowerCase()}%`;
-    conditions.push(
-      or(
-        sql`lower(${contents.title}) LIKE ${term}`,
-        sql`lower(${contents.hookText}) LIKE ${term}`,
-        sql`lower(${contents.notes}) LIKE ${term}`,
-        sql`${contents.searchText} LIKE ${term}`
-      )
-    );
-  }
+    if (seriesId && seriesId !== "all") {
+      conditions.push(eq(contents.seriesId, seriesId));
+    }
 
-  if (pillarSlug && pillarSlug !== "all") {
-    conditions.push(
-      sql`EXISTS (
-        SELECT 1 FROM ${contentPillars} cp
-        JOIN ${pillars} p ON p.id = cp.pillar_id
-        WHERE cp.content_id = ${contents.id} AND p.slug = ${pillarSlug}
-      )`
-    );
-  }
+    if (searchText && searchText.trim()) {
+      const term = `%${searchText.trim().toLowerCase()}%`;
+      conditions.push(
+        or(
+          sql`lower(${contents.title}) LIKE ${term}`,
+          sql`lower(${contents.hookText}) LIKE ${term}`,
+          sql`lower(${contents.notes}) LIKE ${term}`,
+          sql`${contents.searchText} LIKE ${term}`
+        )!
+      );
+    }
 
-  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    if (pillarSlug && pillarSlug !== "all") {
+      conditions.push(
+        sql`EXISTS (
+          SELECT 1 FROM ${contentPillars} cp
+          JOIN ${pillars} p ON p.id = cp.pillar_id
+          WHERE cp.content_id = ${contents.id} AND p.user_id = ${userId} AND p.slug = ${pillarSlug}
+        )`
+      );
+    }
 
-  // Count total
-  const [totalRes] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(contents)
-    .leftJoin(formats, eq(contents.formatId, formats.id))
-    .where(whereClause);
+    const whereClause = and(...conditions);
 
-  const total = totalRes?.count || 0;
+    const [totalRes] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(contents)
+      .leftJoin(formats, eq(contents.formatId, formats.id))
+      .where(whereClause);
 
-  // Query contents
-  const rows = await db
-    .select({
-      content: contents,
-      format: {
-        id: formats.id,
-        name: formats.name,
-        slug: formats.slug,
-      },
-      series: {
-        id: series.id,
-        name: series.name,
-      },
-      hookType: {
-        id: hookTypes.id,
-        name: hookTypes.name,
-        slug: hookTypes.slug,
-      },
-      audio: {
-        id: audios.id,
-        title: audios.title,
-        artist: audios.artist,
-      },
-    })
-    .from(contents)
-    .leftJoin(formats, eq(contents.formatId, formats.id))
-    .leftJoin(series, eq(contents.seriesId, series.id))
-    .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
-    .leftJoin(audios, eq(contents.audioId, audios.id))
-    .where(whereClause)
-    .orderBy(desc(contents.createdAt))
-    .limit(limit)
-    .offset(offset);
+    const total = totalRes?.count || 0;
 
-  if (rows.length === 0) {
-    return { items: [], total };
-  }
-
-  const contentIds = rows.map((r) => r.content.id);
-
-  // Batch query pillars, ref count, posts count, and checklist stats
-  const [pillarRows, refCountRows, postCountRows, checklistRows] = await Promise.all([
-    db
+    const rows = await db
       .select({
-        contentId: contentPillars.contentId,
-        pillarId: pillars.id,
-        name: pillars.name,
-        slug: pillars.slug,
+        content: contents,
+        format: {
+          id: formats.id,
+          name: formats.name,
+          slug: formats.slug,
+        },
+        series: {
+          id: series.id,
+          name: series.name,
+        },
+        hookType: {
+          id: hookTypes.id,
+          name: hookTypes.name,
+          slug: hookTypes.slug,
+        },
+        audio: {
+          id: audios.id,
+          title: audios.title,
+          artist: audios.artist,
+        },
       })
-      .from(contentPillars)
-      .innerJoin(pillars, eq(contentPillars.pillarId, pillars.id))
-      .where(inArray(contentPillars.contentId, contentIds)),
+      .from(contents)
+      .leftJoin(formats, eq(contents.formatId, formats.id))
+      .leftJoin(series, eq(contents.seriesId, series.id))
+      .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
+      .leftJoin(audios, eq(contents.audioId, audios.id))
+      .where(whereClause)
+      .orderBy(desc(contents.createdAt))
+      .limit(limit)
+      .offset(offset);
 
-    db
-      .select({
-        contentId: refs.contentId,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(refs)
-      .where(inArray(refs.contentId, contentIds))
-      .groupBy(refs.contentId),
+    if (rows.length === 0) {
+      return { items: [], total };
+    }
 
-    db
-      .select({
-        contentId: posts.contentId,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(posts)
-      .where(inArray(posts.contentId, contentIds))
-      .groupBy(posts.contentId),
+    const contentIds = rows.map((r) => r.content.id);
 
-    db
-      .select({
-        contentId: contentChecklist.contentId,
-        isDone: contentChecklist.isDone,
-      })
-      .from(contentChecklist)
-      .where(inArray(contentChecklist.contentId, contentIds)),
-  ]);
+    const [pillarRows, refCountRows, postCountRows, checklistRows] = await Promise.all([
+      db
+        .select({
+          contentId: contentPillars.contentId,
+          pillarId: pillars.id,
+          name: pillars.name,
+          slug: pillars.slug,
+        })
+        .from(contentPillars)
+        .innerJoin(pillars, eq(contentPillars.pillarId, pillars.id))
+        .where(inArray(contentPillars.contentId, contentIds)),
 
-  // Aggregate maps
-  const pillarMap = new Map<string, { id: string; name: string; slug: string }[]>();
-  for (const p of pillarRows) {
-    const list = pillarMap.get(p.contentId) || [];
-    list.push({ id: p.pillarId, name: p.name, slug: p.slug });
-    pillarMap.set(p.contentId, list);
-  }
+      db
+        .select({
+          contentId: refs.contentId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(refs)
+        .where(inArray(refs.contentId, contentIds))
+        .groupBy(refs.contentId),
 
-  const refCountMap = new Map<string, number>();
-  for (const r of refCountRows) {
-    if (r.contentId) refCountMap.set(r.contentId, r.count);
-  }
+      db
+        .select({
+          contentId: posts.contentId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(posts)
+        .where(inArray(posts.contentId, contentIds))
+        .groupBy(posts.contentId),
 
-  const postCountMap = new Map<string, number>();
-  for (const p of postCountRows) {
-    postCountMap.set(p.contentId, p.count);
-  }
+      db
+        .select({
+          contentId: contentChecklist.contentId,
+          isDone: contentChecklist.isDone,
+        })
+        .from(contentChecklist)
+        .where(inArray(contentChecklist.contentId, contentIds)),
+    ]);
 
-  const checklistMap = new Map<string, { total: number; done: number }>();
-  for (const cl of checklistRows) {
-    const stat = checklistMap.get(cl.contentId) || { total: 0, done: 0 };
-    stat.total += 1;
-    if (cl.isDone) stat.done += 1;
-    checklistMap.set(cl.contentId, stat);
-  }
+    const pillarMap = new Map<string, { id: string; name: string; slug: string }[]>();
+    for (const p of pillarRows) {
+      const list = pillarMap.get(p.contentId) || [];
+      list.push({ id: p.pillarId, name: p.name, slug: p.slug });
+      pillarMap.set(p.contentId, list);
+    }
 
-  const items: ContentListItem[] = rows.map((r) => ({
-    id: r.content.id,
-    title: r.content.title,
-    status: r.content.status,
-    hookText: r.content.hookText,
-    notes: r.content.notes,
-    changesNote: r.content.changesNote,
-    workUrl: r.content.workUrl,
-    tags: r.content.tags || [],
-    plannedFor: r.content.plannedFor,
-    finalRating: r.content.finalRating,
-    finalRatingNote: r.content.finalRatingNote,
-    archivedAt: r.content.archivedAt,
-    createdAt: r.content.createdAt,
-    updatedAt: r.content.updatedAt,
-    format: r.format?.id ? r.format : null,
-    series: r.series?.id ? r.series : null,
-    hookType: r.hookType?.id ? r.hookType : null,
-    audio: r.audio?.id ? r.audio : null,
-    pillars: pillarMap.get(r.content.id) || [],
-    refsCount: refCountMap.get(r.content.id) || 0,
-    postsCount: postCountMap.get(r.content.id) || 0,
-    checklistStats: checklistMap.get(r.content.id) || { total: 0, done: 0 },
-  }));
+    const refCountMap = new Map<string, number>();
+    for (const r of refCountRows) {
+      if (r.contentId) refCountMap.set(r.contentId, r.count);
+    }
+
+    const postCountMap = new Map<string, number>();
+    for (const p of postCountRows) {
+      postCountMap.set(p.contentId, p.count);
+    }
+
+    const checklistMap = new Map<string, { total: number; done: number }>();
+    for (const cl of checklistRows) {
+      const stat = checklistMap.get(cl.contentId) || { total: 0, done: 0 };
+      stat.total += 1;
+      if (cl.isDone) stat.done += 1;
+      checklistMap.set(cl.contentId, stat);
+    }
+
+    const items: ContentListItem[] = rows.map((r) => ({
+      id: r.content.id,
+      title: r.content.title,
+      status: r.content.status,
+      hookText: r.content.hookText,
+      notes: r.content.notes,
+      changesNote: r.content.changesNote,
+      workUrl: r.content.workUrl,
+      tags: r.content.tags || [],
+      plannedFor: r.content.plannedFor,
+      finalRating: r.content.finalRating,
+      finalRatingNote: r.content.finalRatingNote,
+      archivedAt: r.content.archivedAt,
+      createdAt: r.content.createdAt,
+      updatedAt: r.content.updatedAt,
+      format: r.format?.id ? r.format : null,
+      series: r.series?.id ? r.series : null,
+      hookType: r.hookType?.id ? r.hookType : null,
+      audio: r.audio?.id ? r.audio : null,
+      pillars: pillarMap.get(r.content.id) || [],
+      refsCount: refCountMap.get(r.content.id) || 0,
+      postsCount: postCountMap.get(r.content.id) || 0,
+      checklistStats: checklistMap.get(r.content.id) || { total: 0, done: 0 },
+    }));
 
     return { items, total };
   } catch (error) {
@@ -297,9 +299,15 @@ export interface ContentDetailItem extends ContentListItem {
 }
 
 /**
- * Returns full content details including checklist items, linked refs, and posts with snapshots.
+ * Returns full content details owned by the active user.
  */
-export async function getContentById(id: string): Promise<ContentDetailItem | null> {
+export async function getContentById(
+  id: string,
+  explicitUserId?: string
+): Promise<ContentDetailItem | null> {
+  const userId = explicitUserId ?? (await getOwner())?.id;
+  if (!userId) return null;
+
   const [row] = await db
     .select({
       content: contents,
@@ -328,12 +336,11 @@ export async function getContentById(id: string): Promise<ContentDetailItem | nu
     .leftJoin(series, eq(contents.seriesId, series.id))
     .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
     .leftJoin(audios, eq(contents.audioId, audios.id))
-    .where(eq(contents.id, id))
+    .where(and(eq(contents.id, id), eq(contents.userId, userId)))
     .limit(1);
 
   if (!row) return null;
 
-  // Query relations
   const [pillarRows, refRows, checklistRows, postRows] = await Promise.all([
     db
       .select({
@@ -355,7 +362,7 @@ export async function getContentById(id: string): Promise<ContentDetailItem | nu
       })
       .from(refs)
       .innerJoin(platforms, eq(refs.platformId, platforms.id))
-      .where(eq(refs.contentId, id))
+      .where(and(eq(refs.contentId, id), eq(refs.userId, userId)))
       .orderBy(refs.contentPosition),
 
     db
@@ -381,11 +388,10 @@ export async function getContentById(id: string): Promise<ContentDetailItem | nu
       })
       .from(posts)
       .innerJoin(platforms, eq(posts.platformId, platforms.id))
-      .where(eq(posts.contentId, id))
+      .where(and(eq(posts.contentId, id), eq(posts.userId, userId)))
       .orderBy(desc(posts.postedAt)),
   ]);
 
-  // Query snapshots for all posts of this content
   const postIds = postRows.map((p) => p.id);
   const snapshotRows =
     postIds.length > 0
@@ -461,10 +467,15 @@ export interface StudioMasterOptions {
 }
 
 /**
- * Returns additional studio selections (Series, Audios, Snippets, and unlinked active References).
+ * Returns user-scoped studio selections (Series, Audios, Snippets, and unlinked active References).
  */
-export async function getStudioMasterOptions(): Promise<StudioMasterOptions> {
+export async function getStudioMasterOptions(explicitUserId?: string): Promise<StudioMasterOptions> {
   try {
+    const userId = explicitUserId ?? (await getOwner())?.id;
+    if (!userId) {
+      return { series: [], audios: [], snippets: [], availableRefs: [] };
+    }
+
     const [seriesRows, audioRows, snippetRows, availableRefRows] = await Promise.all([
       db
         .select({
@@ -473,7 +484,7 @@ export async function getStudioMasterOptions(): Promise<StudioMasterOptions> {
           slug: series.slug,
         })
         .from(series)
-        .where(eq(series.isActive, true))
+        .where(and(eq(series.userId, userId), eq(series.isActive, true)))
         .orderBy(asc(series.sortOrder), asc(series.name)),
 
       db
@@ -484,6 +495,7 @@ export async function getStudioMasterOptions(): Promise<StudioMasterOptions> {
           isOriginal: audios.isOriginal,
         })
         .from(audios)
+        .where(eq(audios.userId, userId))
         .orderBy(asc(audios.title))
         .limit(100),
 
@@ -495,6 +507,7 @@ export async function getStudioMasterOptions(): Promise<StudioMasterOptions> {
           body: snippets.body,
         })
         .from(snippets)
+        .where(eq(snippets.userId, userId))
         .orderBy(asc(snippets.title))
         .limit(100),
 
@@ -509,6 +522,7 @@ export async function getStudioMasterOptions(): Promise<StudioMasterOptions> {
         .innerJoin(platforms, eq(refs.platformId, platforms.id))
         .where(
           and(
+            eq(refs.userId, userId),
             isNull(refs.contentId),
             isNull(refs.archivedAt),
             ne(refs.status, "skipped")

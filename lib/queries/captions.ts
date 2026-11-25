@@ -1,6 +1,7 @@
 import "server-only";
-import { eq, sql, desc, and } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { getOwner } from "@/lib/auth/owner";
 import { snippets, pillars, platforms } from "@/db/schema";
 
 export interface SnippetItem {
@@ -17,9 +18,17 @@ export interface SnippetItem {
   createdAt: string;
 }
 
-export async function listSnippets(kind?: "caption" | "hashtag_set"): Promise<SnippetItem[]> {
+export async function listSnippets(
+  kind?: "caption" | "hashtag_set",
+  explicitUserId?: string
+): Promise<SnippetItem[]> {
   try {
-    const whereClause = kind ? eq(snippets.kind, kind) : undefined;
+    const userId = explicitUserId ?? (await getOwner())?.id;
+    if (!userId) return [];
+
+    const whereClause = kind
+      ? and(eq(snippets.userId, userId), eq(snippets.kind, kind))
+      : eq(snippets.userId, userId);
 
     const rows = await db
       .select({

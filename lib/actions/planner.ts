@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contents } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
@@ -11,16 +11,21 @@ export async function setContentSchedule(input: {
   contentId: string;
   dateStr: string | null; // "YYYY-MM-DD" or null
 }): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   try {
-    await db
+    const [updated] = await db
       .update(contents)
       .set({
         plannedFor: input.dateStr ? input.dateStr : null,
         updatedAt: sql`now()`,
       })
-      .where(eq(contents.id, input.contentId));
+      .where(and(eq(contents.id, input.contentId), eq(contents.userId, user.id)))
+      .returning({ id: contents.id });
+
+    if (!updated) {
+      return fail("not_found", "Content not found");
+    }
 
     revalidatePath("/planner");
     revalidatePath("/contents");

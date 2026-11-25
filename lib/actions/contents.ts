@@ -10,6 +10,7 @@ import {
   contentChecklist,
   refs,
   appSettings,
+  pillars,
 } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
@@ -34,7 +35,7 @@ const createContentSchema = z.object({
 export async function createContent(
   input: z.infer<typeof createContentSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = createContentSchema.safeParse(input);
   if (!parsed.success) {
@@ -62,6 +63,7 @@ export async function createContent(
     const [created] = await tx
       .insert(contents)
       .values({
+        userId: user.id,
         title: title.trim(),
         formatId: formatId || null,
         seriesId: seriesId || null,
@@ -83,17 +85,23 @@ export async function createContent(
 
     const contentId = created.id;
 
-    // 2. Insert pillars
+    // 2. Insert pillars (scoped to current user)
     if (pillarIds && pillarIds.length > 0) {
-      await tx.insert(contentPillars).values(
-        pillarIds.map((pId) => ({
-          contentId,
-          pillarId: pId,
-        }))
-      );
+      const ownedPillars = await tx
+        .select({ id: pillars.id })
+        .from(pillars)
+        .where(and(eq(pillars.userId, user.id), inArray(pillars.id, pillarIds)));
+      if (ownedPillars.length > 0) {
+        await tx.insert(contentPillars).values(
+          ownedPillars.map((p) => ({
+            contentId,
+            pillarId: p.id,
+          }))
+        );
+      }
     }
 
-    // 3. Link references (if any)
+    // 3. Link references (scoped to current user)
     if (refIds && refIds.length > 0) {
       for (let i = 0; i < refIds.length; i++) {
         await tx
@@ -104,7 +112,7 @@ export async function createContent(
             status: "production",
             statusChangedAt: sql`now()`,
           })
-          .where(eq(refs.id, refIds[i]));
+          .where(and(eq(refs.id, refIds[i]), eq(refs.userId, user.id)));
       }
     }
 
@@ -112,7 +120,7 @@ export async function createContent(
     const [settingsRow] = await tx
       .select({ defaultChecklist: appSettings.defaultChecklist })
       .from(appSettings)
-      .where(eq(appSettings.id, 1))
+      .where(eq(appSettings.userId, user.id))
       .limit(1);
 
     const fallbackChecklist = [
@@ -170,7 +178,7 @@ const updateContentSchema = z.object({
 export async function updateContent(
   input: z.infer<typeof updateContentSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = updateContentSchema.safeParse(input);
   if (!parsed.success) {
@@ -189,8 +197,12 @@ export async function updateContent(
         tags: contents.tags,
       })
       .from(contents)
-      .where(eq(contents.id, id))
+      .where(and(eq(contents.id, id), eq(contents.userId, user.id)))
       .limit(1);
+
+    if (!existing) {
+      return fail("not_found", "Content not found");
+    }
 
     const valuesToUpdate: Record<string, any> = {
       updatedAt: sql`now()`,
@@ -210,30 +222,37 @@ export async function updateContent(
     if (updates.finalRating !== undefined) valuesToUpdate.finalRating = updates.finalRating;
     if (updates.finalRatingNote !== undefined) valuesToUpdate.finalRatingNote = updates.finalRatingNote;
 
-    if (existing) {
-      const mergedTitle = updates.title !== undefined ? updates.title.trim() : existing.title;
-      const mergedHook = updates.hookText !== undefined ? updates.hookText : existing.hookText || "";
-      const mergedNotes = updates.notes !== undefined ? updates.notes : existing.notes || "";
-      const mergedChanges =
-        updates.changesNote !== undefined ? updates.changesNote : existing.changesNote || "";
-      const mergedTags = updates.tags !== undefined ? updates.tags : existing.tags || [];
-      valuesToUpdate.searchText = [mergedTitle, mergedHook, mergedNotes, mergedChanges, ...mergedTags]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-    }
+    const mergedTitle = updates.title !== undefined ? updates.title.trim() : existing.title;
+    const mergedHook = updates.hookText !== undefined ? updates.hookText : existing.hookText || "";
+    const mergedNotes = updates.notes !== undefined ? updates.notes : existing.notes || "";
+    const mergedChanges =
+      updates.changesNote !== undefined ? updates.changesNote : existing.changesNote || "";
+    const mergedTags = updates.tags !== undefined ? updates.tags : existing.tags || [];
+    valuesToUpdate.searchText = [mergedTitle, mergedHook, mergedNotes, mergedChanges, ...mergedTags]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
 
-    await tx.update(contents).set(valuesToUpdate).where(eq(contents.id, id));
+    await tx
+      .update(contents)
+      .set(valuesToUpdate)
+      .where(and(eq(contents.id, id), eq(contents.userId, user.id)));
 
     if (pillarIds) {
       await tx.delete(contentPillars).where(eq(contentPillars.contentId, id));
       if (pillarIds.length > 0) {
-        await tx.insert(contentPillars).values(
-          pillarIds.map((pId) => ({
-            contentId: id,
-            pillarId: pId,
-          }))
-        );
+        const ownedPillars = await tx
+          .select({ id: pillars.id })
+          .from(pillars)
+          .where(and(eq(pillars.userId, user.id), inArray(pillars.id, pillarIds)));
+        if (ownedPillars.length > 0) {
+          await tx.insert(contentPillars).values(
+            ownedPillars.map((p) => ({
+              contentId: id,
+              pillarId: p.id,
+            }))
+          );
+        }
       }
     }
 
@@ -253,10 +272,19 @@ const toggleChecklistSchema = z.object({
 export async function toggleChecklistItem(
   input: z.infer<typeof toggleChecklistSchema>
 ): Promise<ActionResult<{ id: string; isDone: boolean }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = toggleChecklistSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid checklist item ID");
+
+  const [item] = await db
+    .select({ id: contentChecklist.id })
+    .from(contentChecklist)
+    .innerJoin(contents, eq(contentChecklist.contentId, contents.id))
+    .where(and(eq(contentChecklist.id, parsed.data.id), eq(contents.userId, user.id)))
+    .limit(1);
+
+  if (!item) return fail("not_found", "Checklist item not found");
 
   await db
     .update(contentChecklist)
@@ -274,10 +302,18 @@ const addChecklistSchema = z.object({
 export async function addChecklistItem(
   input: z.infer<typeof addChecklistSchema>
 ): Promise<ActionResult<{ id: string; label: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = addChecklistSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid checklist item");
+
+  const [ownedContent] = await db
+    .select({ id: contents.id })
+    .from(contents)
+    .where(and(eq(contents.id, parsed.data.contentId), eq(contents.userId, user.id)))
+    .limit(1);
+
+  if (!ownedContent) return fail("not_found", "Content not found");
 
   const [countRes] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -308,12 +344,34 @@ const deleteChecklistSchema = z.object({
 export async function deleteChecklistItem(
   input: z.infer<typeof deleteChecklistSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = deleteChecklistSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid checklist item");
 
-  await db.delete(contentChecklist).where(eq(contentChecklist.id, parsed.data.id));
+  const [item] = await db
+    .select({ id: contentChecklist.id })
+    .from(contentChecklist)
+    .innerJoin(contents, eq(contentChecklist.contentId, contents.id))
+    .where(
+      and(
+        eq(contentChecklist.id, parsed.data.id),
+        eq(contentChecklist.contentId, parsed.data.contentId),
+        eq(contents.userId, user.id)
+      )
+    )
+    .limit(1);
+
+  if (!item) return fail("not_found", "Checklist item not found");
+
+  await db
+    .delete(contentChecklist)
+    .where(
+      and(
+        eq(contentChecklist.id, parsed.data.id),
+        eq(contentChecklist.contentId, parsed.data.contentId)
+      )
+    );
 
   revalidatePath(`/contents/${parsed.data.contentId}`);
   return ok({ id: parsed.data.id });
@@ -327,16 +385,26 @@ const linkRefSchema = z.object({
 export async function linkReferenceToContent(
   input: z.infer<typeof linkRefSchema>
 ): Promise<ActionResult<{ contentId: string; refId: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = linkRefSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid parameters");
 
   return await withTx(async (tx) => {
+    const [ownedContent] = await tx
+      .select({ id: contents.id })
+      .from(contents)
+      .where(and(eq(contents.id, parsed.data.contentId), eq(contents.userId, user.id)))
+      .limit(1);
+
+    if (!ownedContent) {
+      return fail("not_found", "Content not found");
+    }
+
     const [refRow] = await tx
       .select({ id: refs.id, contentId: refs.contentId })
       .from(refs)
-      .where(eq(refs.id, parsed.data.refId))
+      .where(and(eq(refs.id, parsed.data.refId), eq(refs.userId, user.id)))
       .limit(1);
 
     if (!refRow) {
@@ -349,7 +417,7 @@ export async function linkReferenceToContent(
     const [existingCount] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(refs)
-      .where(eq(refs.contentId, parsed.data.contentId));
+      .where(and(eq(refs.contentId, parsed.data.contentId), eq(refs.userId, user.id)));
 
     const nextPosition = (existingCount?.count || 0) + 1;
 
@@ -361,7 +429,7 @@ export async function linkReferenceToContent(
         status: "production",
         statusChangedAt: sql`now()`,
       })
-      .where(eq(refs.id, parsed.data.refId));
+      .where(and(eq(refs.id, parsed.data.refId), eq(refs.userId, user.id)));
 
     await recomputeContent(tx, parsed.data.contentId);
 
@@ -376,13 +444,13 @@ export async function linkReferenceToContent(
 export async function unlinkReferenceFromContent(
   input: z.infer<typeof linkRefSchema>
 ): Promise<ActionResult<{ contentId: string; refId: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = linkRefSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid parameters");
 
   return await withTx(async (tx) => {
-    await tx
+    const [unlinked] = await tx
       .update(refs)
       .set({
         contentId: null,
@@ -390,7 +458,18 @@ export async function unlinkReferenceFromContent(
         status: "selected",
         statusChangedAt: sql`now()`,
       })
-      .where(eq(refs.id, parsed.data.refId));
+      .where(
+        and(
+          eq(refs.id, parsed.data.refId),
+          eq(refs.contentId, parsed.data.contentId),
+          eq(refs.userId, user.id)
+        )
+      )
+      .returning({ id: refs.id });
+
+    if (!unlinked) {
+      return fail("not_found", "Linked reference not found");
+    }
 
     await recomputeContent(tx, parsed.data.contentId);
 
@@ -409,15 +488,18 @@ const archiveContentSchema = z.object({
 export async function archiveContent(
   input: z.infer<typeof archiveContentSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = archiveContentSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid content ID");
 
-  await db
+  const [updated] = await db
     .update(contents)
     .set({ archivedAt: sql`now()` })
-    .where(eq(contents.id, parsed.data.id));
+    .where(and(eq(contents.id, parsed.data.id), eq(contents.userId, user.id)))
+    .returning({ id: contents.id });
+
+  if (!updated) return fail("not_found", "Content not found");
 
   revalidatePath("/contents");
   revalidatePath(`/contents/${parsed.data.id}`);
@@ -429,15 +511,18 @@ export async function archiveContent(
 export async function restoreContent(
   input: z.infer<typeof archiveContentSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = archiveContentSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid content ID");
 
-  await db
+  const [updated] = await db
     .update(contents)
     .set({ archivedAt: null, updatedAt: sql`now()` })
-    .where(eq(contents.id, parsed.data.id));
+    .where(and(eq(contents.id, parsed.data.id), eq(contents.userId, user.id)))
+    .returning({ id: contents.id });
+
+  if (!updated) return fail("not_found", "Content not found");
 
   revalidatePath("/contents");
   revalidatePath(`/contents/${parsed.data.id}`);
@@ -449,12 +534,22 @@ export async function restoreContent(
 export async function deleteContentPermanently(
   input: z.infer<typeof archiveContentSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = archiveContentSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid content ID");
 
   return await withTx(async (tx) => {
+    const [existing] = await tx
+      .select({ id: contents.id })
+      .from(contents)
+      .where(and(eq(contents.id, parsed.data.id), eq(contents.userId, user.id)))
+      .limit(1);
+
+    if (!existing) {
+      return fail("not_found", "Content not found");
+    }
+
     // Release linked references cleanly so refs_status_content_chk & ON DELETE RESTRICT are satisfied
     await tx
       .update(refs)
@@ -464,9 +559,11 @@ export async function deleteContentPermanently(
         status: "selected",
         statusChangedAt: sql`now()`,
       })
-      .where(eq(refs.contentId, parsed.data.id));
+      .where(and(eq(refs.contentId, parsed.data.id), eq(refs.userId, user.id)));
 
-    await tx.delete(contents).where(eq(contents.id, parsed.data.id));
+    await tx
+      .delete(contents)
+      .where(and(eq(contents.id, parsed.data.id), eq(contents.userId, user.id)));
 
     revalidatePath("/contents");
     revalidatePath("/references");

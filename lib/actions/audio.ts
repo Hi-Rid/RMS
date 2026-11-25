@@ -18,7 +18,7 @@ const createAudioSchema = z.object({
 export async function createAudio(
   input: z.infer<typeof createAudioSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
   const parsed = createAudioSchema.safeParse(input);
   if (!parsed.success) {
     return fail("validation", parsed.error.issues[0]?.message || "Invalid input");
@@ -27,12 +27,13 @@ export async function createAudio(
   const { title, artist, isOriginal, notes } = parsed.data;
 
   try {
-    // Check duplicate by title & artist (case-insensitive)
+    // Check duplicate by title & artist (case-insensitive) within user workspace
     const [existing] = await db
       .select({ id: audios.id })
       .from(audios)
       .where(
         and(
+          eq(audios.userId, user.id),
           sql`lower(btrim(${audios.title})) = ${title.toLowerCase().trim()}`,
           sql`lower(btrim(${audios.artist})) = ${artist.toLowerCase().trim()}`
         )
@@ -46,6 +47,7 @@ export async function createAudio(
     const [created] = await db
       .insert(audios)
       .values({
+        userId: user.id,
         title: title.trim(),
         artist: artist.trim(),
         isOriginal,
@@ -72,7 +74,7 @@ const updateAudioSchema = z.object({
 export async function updateAudio(
   input: z.infer<typeof updateAudioSchema>
 ): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
   const parsed = updateAudioSchema.safeParse(input);
   if (!parsed.success) {
     return fail("validation", parsed.error.issues[0]?.message || "Invalid input");
@@ -81,7 +83,7 @@ export async function updateAudio(
   const { id, title, artist, isOriginal, notes } = parsed.data;
 
   try {
-    await db
+    const [updated] = await db
       .update(audios)
       .set({
         title: title.trim(),
@@ -90,7 +92,12 @@ export async function updateAudio(
         notes: notes || null,
         updatedAt: sql`now()`,
       })
-      .where(eq(audios.id, id));
+      .where(and(eq(audios.id, id), eq(audios.userId, user.id)))
+      .returning({ id: audios.id });
+
+    if (!updated) {
+      return fail("not_found", "Audio track not found");
+    }
 
     revalidatePath("/audio");
     revalidatePath(`/audio/${id}`);
@@ -102,19 +109,29 @@ export async function updateAudio(
 }
 
 export async function deleteAudio(id: string): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   try {
+    const [existing] = await db
+      .select({ id: audios.id })
+      .from(audios)
+      .where(and(eq(audios.id, id), eq(audios.userId, user.id)))
+      .limit(1);
+
+    if (!existing) {
+      return fail("not_found", "Audio track not found");
+    }
+
     // Check if used by refs or contents
     const [refCountRes, contentCountRes] = await Promise.all([
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(refs)
-        .where(eq(refs.audioId, id)),
+        .where(and(eq(refs.audioId, id), eq(refs.userId, user.id))),
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(contents)
-        .where(eq(contents.audioId, id)),
+        .where(and(eq(contents.audioId, id), eq(contents.userId, user.id))),
     ]);
 
     const usedInRefs = refCountRes[0]?.count || 0;
@@ -127,7 +144,9 @@ export async function deleteAudio(id: string): Promise<ActionResult<void>> {
       );
     }
 
-    await db.delete(audios).where(eq(audios.id, id));
+    await db
+      .delete(audios)
+      .where(and(eq(audios.id, id), eq(audios.userId, user.id)));
     revalidatePath("/audio");
     return ok(undefined);
   } catch (error) {

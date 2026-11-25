@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, withTx } from "@/lib/db";
 import { posts, snapshots, contents, formats } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
@@ -24,7 +24,7 @@ const addPostSchema = z.object({
 export async function addPost(
   input: z.infer<typeof addPostSchema>
 ): Promise<ActionResult<{ id: string; checkpointsCreated: number }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = addPostSchema.safeParse(input);
   if (!parsed.success) {
@@ -35,31 +35,45 @@ export async function addPost(
   const postDate = postedAt ? new Date(postedAt) : new Date();
 
   return await withTx(async (tx) => {
-    // 1. Check if post for this platform already exists on this content (unique constraint)
+    // 1. Verify ownership & determine whether content format uses checkpoints (e.g. Story -> false)
+    const [formatInfo] = await tx
+      .select({
+        contentId: contents.id,
+        hasCheckpoints: formats.hasCheckpoints,
+      })
+      .from(contents)
+      .leftJoin(formats, eq(contents.formatId, formats.id))
+      .where(and(eq(contents.id, contentId), eq(contents.userId, user.id)))
+      .limit(1);
+
+    if (!formatInfo) {
+      return fail("not_found", "Content not found");
+    }
+
+    // 2. Check if post for this platform already exists on this content (unique constraint)
     const [existing] = await tx
       .select({ id: posts.id })
       .from(posts)
-      .where(sql`${posts.contentId} = ${contentId} AND ${posts.platformId} = ${platformId}`)
+      .where(
+        and(
+          eq(posts.contentId, contentId),
+          eq(posts.platformId, platformId),
+          eq(posts.userId, user.id)
+        )
+      )
       .limit(1);
 
     if (existing) {
       return fail("conflict", "A post for this platform already exists on this content");
     }
 
-    // 2. Determine whether content format uses checkpoints (e.g. Story -> false)
-    const [formatInfo] = await tx
-      .select({ hasCheckpoints: formats.hasCheckpoints })
-      .from(contents)
-      .leftJoin(formats, eq(contents.formatId, formats.id))
-      .where(eq(contents.id, contentId))
-      .limit(1);
-
-    const shouldCreateCheckpoints = formatInfo?.hasCheckpoints ?? true;
+    const shouldCreateCheckpoints = formatInfo.hasCheckpoints ?? true;
 
     // 3. Insert post
     const [createdPost] = await tx
       .insert(posts)
       .values({
+        userId: user.id,
         contentId,
         platformId,
         url: url || null,
@@ -76,6 +90,7 @@ export async function addPost(
       for (const checkpoint of CHECKPOINTS) {
         const checkpointDue = dueAt(postDate, checkpoint);
         await tx.insert(snapshots).values({
+          userId: user.id,
           postId,
           checkpoint,
           dueAt: checkpointDue.toISOString(),
@@ -110,13 +125,26 @@ const deletePostSchema = z.object({
 export async function deletePost(
   input: z.infer<typeof deletePostSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = deletePostSchema.safeParse(input);
   if (!parsed.success) return fail("validation", "Invalid parameters");
 
   return await withTx(async (tx) => {
-    await tx.delete(posts).where(eq(posts.id, parsed.data.postId));
+    const [deleted] = await tx
+      .delete(posts)
+      .where(
+        and(
+          eq(posts.id, parsed.data.postId),
+          eq(posts.contentId, parsed.data.contentId),
+          eq(posts.userId, user.id)
+        )
+      )
+      .returning({ id: posts.id });
+
+    if (!deleted) {
+      return fail("not_found", "Post not found");
+    }
 
     await recomputeContent(tx, parsed.data.contentId);
 

@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { snippets } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
@@ -19,7 +19,7 @@ const createSnippetSchema = z.object({
 export async function createSnippet(
   input: z.infer<typeof createSnippetSchema>
 ): Promise<ActionResult<{ id: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
   const parsed = createSnippetSchema.safeParse(input);
   if (!parsed.success) {
     return fail("validation", parsed.error.issues[0]?.message || "Invalid input");
@@ -29,6 +29,7 @@ export async function createSnippet(
     const [created] = await db
       .insert(snippets)
       .values({
+        userId: user.id,
         kind: parsed.data.kind,
         title: parsed.data.title,
         body: parsed.data.body,
@@ -56,14 +57,14 @@ const updateSnippetSchema = z.object({
 export async function updateSnippet(
   input: z.infer<typeof updateSnippetSchema>
 ): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
   const parsed = updateSnippetSchema.safeParse(input);
   if (!parsed.success) {
     return fail("validation", parsed.error.issues[0]?.message || "Invalid input");
   }
 
   try {
-    await db
+    const [updated] = await db
       .update(snippets)
       .set({
         title: parsed.data.title,
@@ -72,7 +73,12 @@ export async function updateSnippet(
         platformId: parsed.data.platformId || null,
         updatedAt: sql`now()`,
       })
-      .where(eq(snippets.id, parsed.data.id));
+      .where(and(eq(snippets.id, parsed.data.id), eq(snippets.userId, user.id)))
+      .returning({ id: snippets.id });
+
+    if (!updated) {
+      return fail("not_found", "Snippet not found");
+    }
 
     revalidatePath("/captions");
     return ok(undefined);
@@ -83,10 +89,18 @@ export async function updateSnippet(
 }
 
 export async function deleteSnippet(id: string): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   try {
-    await db.delete(snippets).where(eq(snippets.id, id));
+    const [deleted] = await db
+      .delete(snippets)
+      .where(and(eq(snippets.id, id), eq(snippets.userId, user.id)))
+      .returning({ id: snippets.id });
+
+    if (!deleted) {
+      return fail("not_found", "Snippet not found");
+    }
+
     revalidatePath("/captions");
     return ok(undefined);
   } catch (error) {
@@ -96,14 +110,21 @@ export async function deleteSnippet(id: string): Promise<ActionResult<void>> {
 }
 
 export async function markSnippetUsed(id: string): Promise<ActionResult<void>> {
+  const user = await requireActionOwner();
+
   try {
-    await db
+    const [updated] = await db
       .update(snippets)
       .set({
         useCount: sql`${snippets.useCount} + 1`,
         lastUsedAt: sql`now()`,
       })
-      .where(eq(snippets.id, id));
+      .where(and(eq(snippets.id, id), eq(snippets.userId, user.id)))
+      .returning({ id: snippets.id });
+
+    if (!updated) {
+      return fail("not_found", "Snippet not found");
+    }
 
     return ok(undefined);
   } catch (error) {

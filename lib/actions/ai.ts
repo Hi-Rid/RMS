@@ -18,9 +18,9 @@ async function executeWithAiGuard<T>(
     langInstruction: string;
   }) => Promise<{ data: T; inputTokens?: number; outputTokens?: number }>
 ): Promise<ActionResult<T>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
-  const settings = await getAppSettings();
+  const settings = await getAppSettings(user.id);
   if (!settings.aiEnabled) {
     return fail(
       "ai_disabled",
@@ -40,6 +40,7 @@ async function executeWithAiGuard<T>(
     await db
       .insert(aiUsage)
       .values({
+        userId: user.id,
         feature,
         provider: settings.aiProvider || "google",
         model: settings.aiTextModel || "gemini-flash-lite-latest",
@@ -72,6 +73,7 @@ async function executeWithAiGuard<T>(
     await db
       .insert(aiUsage)
       .values({
+        userId: user.id,
         feature,
         provider: settings.aiProvider || "google",
         model: usedModel,
@@ -91,6 +93,7 @@ async function executeWithAiGuard<T>(
     await db
       .insert(aiUsage)
       .values({
+        userId: user.id,
         feature,
         provider: settings.aiProvider || "google",
         model: usedModel,

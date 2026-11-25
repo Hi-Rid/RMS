@@ -76,7 +76,7 @@ function LoginForm() {
     startTransition(async () => {
       const res = await signInWithPassword({ email, password });
       if (res.ok) {
-        toast.success("Welcome back!");
+        toast.success("Signed in!");
         router.push(safeRedirectTarget);
         router.refresh();
       } else {
@@ -118,7 +118,7 @@ function LoginForm() {
     startTransition(async () => {
       const res = await verifyLoginCode({ email, code });
       if (res.ok) {
-        toast.success("Welcome back!");
+        toast.success("Signed in!");
         router.push(safeRedirectTarget);
         router.refresh();
       } else {

@@ -1,6 +1,7 @@
 import "server-only";
 import { eq, sql, desc, and, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { getOwner } from "@/lib/auth/owner";
 import { sourceAccounts, platforms, refs, contents } from "@/db/schema";
 
 export interface SourceListItem {
@@ -20,11 +21,14 @@ export interface SourceListItem {
 }
 
 export async function listSources(params: {
+  userId?: string;
   searchText?: string;
   sortBy?: "refs" | "handle" | "score";
 } = {}): Promise<SourceListItem[]> {
   try {
     const { searchText, sortBy = "refs" } = params;
+    const userId = params.userId ?? (await getOwner())?.id;
+    if (!userId) return [];
 
     const rows = await db
       .select({
@@ -35,21 +39,23 @@ export async function listSources(params: {
         platformId: platforms.id,
         platformName: platforms.name,
         platformSlug: platforms.slug,
-        refsCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.sourceAccountId} = ${sourceAccounts.id} AND ${refs.archivedAt} IS NULL)`,
-        selectedCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.sourceAccountId} = ${sourceAccounts.id} AND ${refs.status} = 'selected' AND ${refs.archivedAt} IS NULL)`,
-        productionCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.sourceAccountId} = ${sourceAccounts.id} AND ${refs.status} = 'production' AND ${refs.archivedAt} IS NULL)`,
+        refsCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.sourceAccountId} = ${sourceAccounts.id} AND ${refs.userId} = ${userId} AND ${refs.archivedAt} IS NULL)`,
+        selectedCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.sourceAccountId} = ${sourceAccounts.id} AND ${refs.userId} = ${userId} AND ${refs.status} = 'selected' AND ${refs.archivedAt} IS NULL)`,
+        productionCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.sourceAccountId} = ${sourceAccounts.id} AND ${refs.userId} = ${userId} AND ${refs.status} = 'production' AND ${refs.archivedAt} IS NULL)`,
         avgScore: sql<number | null>`(
           SELECT round(avg(c.final_rating)::numeric, 1)
           FROM ${refs} r
           JOIN ${contents} c ON c.id = r.content_id
           WHERE r.source_account_id = ${sourceAccounts.id}
+            AND r.user_id = ${userId}
             AND r.archived_at IS NULL
             AND c.archived_at IS NULL
             AND c.final_rating IS NOT NULL
         )`,
       })
       .from(sourceAccounts)
-      .innerJoin(platforms, eq(sourceAccounts.platformId, platforms.id));
+      .innerJoin(platforms, eq(sourceAccounts.platformId, platforms.id))
+      .where(eq(sourceAccounts.userId, userId));
 
     let items: SourceListItem[] = rows.map((r) => ({
       id: r.id,
@@ -92,8 +98,11 @@ export async function listSources(params: {
   }
 }
 
-export async function getSourceById(id: string) {
+export async function getSourceById(id: string, explicitUserId?: string) {
   try {
+    const userId = explicitUserId ?? (await getOwner())?.id;
+    if (!userId) return null;
+
     const [source] = await db
       .select({
         id: sourceAccounts.id,
@@ -108,7 +117,7 @@ export async function getSourceById(id: string) {
       })
       .from(sourceAccounts)
       .innerJoin(platforms, eq(sourceAccounts.platformId, platforms.id))
-      .where(eq(sourceAccounts.id, id))
+      .where(and(eq(sourceAccounts.id, id), eq(sourceAccounts.userId, userId)))
       .limit(1);
 
     if (!source) return null;
@@ -123,7 +132,7 @@ export async function getSourceById(id: string) {
         savedAt: refs.savedAt,
       })
       .from(refs)
-      .where(and(eq(refs.sourceAccountId, id), isNull(refs.archivedAt)))
+      .where(and(eq(refs.sourceAccountId, id), eq(refs.userId, userId), isNull(refs.archivedAt)))
       .orderBy(desc(refs.savedAt));
 
     return {

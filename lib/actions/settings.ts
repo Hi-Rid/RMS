@@ -1,7 +1,7 @@
 "use server";
 
 import crypto from "crypto";
-import { eq, sql, asc } from "drizzle-orm";
+import { and, eq, sql, asc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
@@ -22,6 +22,7 @@ import {
   posts,
 } from "@/db/schema";
 import { getAppSettings } from "@/lib/queries/settings";
+import { invalidateReferenceMasterCache } from "@/lib/queries/references";
 import { getGoogleClient, runWithModelFallback } from "@/lib/ai/client";
 import { slugify } from "@/lib/domain/normalize";
 import { generateText } from "ai";
@@ -30,7 +31,7 @@ import { generateText } from "ai";
  * Rotates the Ingest Bearer Token (PRD §11.1 & §11.8).
  */
 export async function rotateIngestToken(): Promise<ActionResult<{ token: string }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   try {
     const token = crypto.randomBytes(32).toString("base64url");
@@ -45,9 +46,10 @@ export async function rotateIngestToken(): Promise<ActionResult<{ token: string 
         ingestTokenRotatedAt: sql`now()`,
         updatedAt: sql`now()`,
       })
-      .where(eq(appSettings.id, 1));
+      .where(eq(appSettings.userId, user.id));
 
     await db.insert(systemLogs).values({
+      userId: user.id,
       kind: "ingest",
       level: "info",
       message: "Ingest token rotated by owner",
@@ -69,8 +71,8 @@ export async function rotateIngestToken(): Promise<ActionResult<{ token: string 
 export async function getIngestSettings(): Promise<
   ActionResult<{ hasToken: boolean; weeklyPostTarget: number }>
 > {
-  await requireActionOwner();
-  const settings = await getAppSettings();
+  const user = await requireActionOwner();
+  const settings = await getAppSettings(user.id);
   return ok({
     hasToken: settings.hasToken,
     weeklyPostTarget: settings.weeklyPostTarget,
@@ -86,7 +88,7 @@ const generalSettingsSchema = z.object({
 export async function updateGeneralSettings(
   input: z.infer<typeof generalSettingsSchema>
 ): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = generalSettingsSchema.safeParse(input);
   if (!parsed.success) {
@@ -102,7 +104,7 @@ export async function updateGeneralSettings(
         defaultChecklist: parsed.data.defaultChecklist,
         updatedAt: sql`now()`,
       })
-      .where(eq(appSettings.id, 1));
+      .where(eq(appSettings.userId, user.id));
 
     revalidatePath("/");
     revalidatePath("/settings");
@@ -128,7 +130,7 @@ const aiSettingsSchema = z.object({
 export async function updateAiSettings(
   input: z.infer<typeof aiSettingsSchema>
 ): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const parsed = aiSettingsSchema.safeParse(input);
   if (!parsed.success) {
@@ -147,7 +149,7 @@ export async function updateAiSettings(
         aiOutputLanguage: parsed.data.aiOutputLanguage,
         updatedAt: sql`now()`,
       })
-      .where(eq(appSettings.id, 1));
+      .where(eq(appSettings.userId, user.id));
 
     revalidatePath("/settings");
     revalidatePath("/references");
@@ -167,14 +169,14 @@ export async function updateAiSettings(
 export async function testAiConnection(): Promise<
   ActionResult<{ message: string; latencyMs: number; model: string }>
 > {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const google = getGoogleClient();
   if (!google) {
     return fail("ai_disabled", "No Gemini API key configured in .env.local or environment.");
   }
 
-  const settings = await getAppSettings();
+  const settings = await getAppSettings(user.id);
   const start = Date.now();
   try {
     const { text, modelUsed } = await runWithModelFallback(
@@ -191,6 +193,7 @@ export async function testAiConnection(): Promise<
     const latencyMs = Date.now() - start;
 
     await db.insert(systemLogs).values({
+      userId: user.id,
       kind: "ai",
       level: "info",
       message: `AI Test Connection successful using ${modelUsed} (${latencyMs}ms)`,
@@ -221,7 +224,8 @@ function getMasterTable(tableType: MasterTableType) {
   }
 }
 
-function revalidateMasterConsumers() {
+function revalidateMasterConsumers(userId: string) {
+  invalidateReferenceMasterCache(userId);
   revalidatePath("/settings");
   revalidatePath("/references");
   revalidatePath("/inbox");
@@ -239,16 +243,21 @@ export async function toggleMasterItem(
   id: string,
   isActive: boolean
 ): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   try {
     const tbl = getMasterTable(tableType);
-    await db
+    const [updated] = await db
       .update(tbl)
       .set({ isActive, updatedAt: sql`now()` })
-      .where(eq(tbl.id, id));
+      .where(and(eq(tbl.id, id), eq(tbl.userId, user.id)))
+      .returning({ id: tbl.id });
 
-    revalidateMasterConsumers();
+    if (!updated) {
+      return fail("not_found", "Master item not found");
+    }
+
+    revalidateMasterConsumers(user.id);
     return ok();
   } catch (err) {
     console.error(`Error toggling master item ${tableType}:`, err);
@@ -269,7 +278,7 @@ export async function createMasterItem(
     isTarget?: boolean;
   }
 ): Promise<ActionResult<{ id: string; slug: string; sortOrder: number }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   const trimmed = name.trim();
   if (!trimmed || trimmed.length > 60) {
@@ -282,7 +291,8 @@ export async function createMasterItem(
     const tbl = getMasterTable(tableType);
     const [maxOrderRes] = await db
       .select({ maxOrder: sql<number>`coalesce(max(${tbl.sortOrder}), 0)::int` })
-      .from(tbl);
+      .from(tbl)
+      .where(eq(tbl.userId, user.id));
     const nextOrder = (Number(maxOrderRes?.maxOrder) || 0) + 1;
 
     let newId = "";
@@ -290,7 +300,13 @@ export async function createMasterItem(
       case "pillars": {
         const [row] = await db
           .insert(pillars)
-          .values({ name: trimmed, slug: baseSlug, sortOrder: nextOrder, isActive: true })
+          .values({
+            userId: user.id,
+            name: trimmed,
+            slug: baseSlug,
+            sortOrder: nextOrder,
+            isActive: true,
+          })
           .returning({ id: pillars.id });
         newId = row.id;
         break;
@@ -298,7 +314,13 @@ export async function createMasterItem(
       case "series": {
         const [row] = await db
           .insert(series)
-          .values({ name: trimmed, slug: baseSlug, sortOrder: nextOrder, isActive: true })
+          .values({
+            userId: user.id,
+            name: trimmed,
+            slug: baseSlug,
+            sortOrder: nextOrder,
+            isActive: true,
+          })
           .returning({ id: series.id });
         newId = row.id;
         break;
@@ -307,6 +329,7 @@ export async function createMasterItem(
         const [row] = await db
           .insert(formats)
           .values({
+            userId: user.id,
             name: trimmed,
             slug: baseSlug,
             sortOrder: nextOrder,
@@ -320,7 +343,13 @@ export async function createMasterItem(
       case "hookTypes": {
         const [row] = await db
           .insert(hookTypes)
-          .values({ name: trimmed, slug: baseSlug, sortOrder: nextOrder, isActive: true })
+          .values({
+            userId: user.id,
+            name: trimmed,
+            slug: baseSlug,
+            sortOrder: nextOrder,
+            isActive: true,
+          })
           .returning({ id: hookTypes.id });
         newId = row.id;
         break;
@@ -333,6 +362,7 @@ export async function createMasterItem(
         const [row] = await db
           .insert(platforms)
           .values({
+            userId: user.id,
             name: trimmed,
             slug: baseSlug,
             sortOrder: nextOrder,
@@ -347,7 +377,7 @@ export async function createMasterItem(
       }
     }
 
-    revalidateMasterConsumers();
+    revalidateMasterConsumers(user.id);
     return ok({ id: newId, slug: baseSlug, sortOrder: nextOrder });
   } catch (err: unknown) {
     const pgErr = err as { code?: string };
@@ -373,44 +403,57 @@ export async function updateMasterItem(
     isTarget?: boolean;
   }
 ): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
   const trimmed = input.name.trim();
   if (!trimmed || trimmed.length > 60) {
     return fail("validation", "Name must be between 1 and 60 characters");
   }
 
   try {
+    let updatedId: string | undefined;
     switch (tableType) {
-      case "pillars":
-        await db
+      case "pillars": {
+        const [row] = await db
           .update(pillars)
           .set({ name: trimmed, updatedAt: sql`now()` })
-          .where(eq(pillars.id, id));
+          .where(and(eq(pillars.id, id), eq(pillars.userId, user.id)))
+          .returning({ id: pillars.id });
+        updatedId = row?.id;
         break;
-      case "series":
-        await db
+      }
+      case "series": {
+        const [row] = await db
           .update(series)
           .set({ name: trimmed, updatedAt: sql`now()` })
-          .where(eq(series.id, id));
+          .where(and(eq(series.id, id), eq(series.userId, user.id)))
+          .returning({ id: series.id });
+        updatedId = row?.id;
         break;
-      case "formats":
-        await db
+      }
+      case "formats": {
+        const [row] = await db
           .update(formats)
           .set({
             name: trimmed,
             updatedAt: sql`now()`,
             ...(input.hasCheckpoints !== undefined ? { hasCheckpoints: input.hasCheckpoints } : {}),
           })
-          .where(eq(formats.id, id));
+          .where(and(eq(formats.id, id), eq(formats.userId, user.id)))
+          .returning({ id: formats.id });
+        updatedId = row?.id;
         break;
-      case "hookTypes":
-        await db
+      }
+      case "hookTypes": {
+        const [row] = await db
           .update(hookTypes)
           .set({ name: trimmed, updatedAt: sql`now()` })
-          .where(eq(hookTypes.id, id));
+          .where(and(eq(hookTypes.id, id), eq(hookTypes.userId, user.id)))
+          .returning({ id: hookTypes.id });
+        updatedId = row?.id;
         break;
-      case "platforms":
-        await db
+      }
+      case "platforms": {
+        const [row] = await db
           .update(platforms)
           .set({
             name: trimmed,
@@ -419,11 +462,18 @@ export async function updateMasterItem(
             ...(input.isSource !== undefined ? { isSource: input.isSource } : {}),
             ...(input.isTarget !== undefined ? { isTarget: input.isTarget } : {}),
           })
-          .where(eq(platforms.id, id));
+          .where(and(eq(platforms.id, id), eq(platforms.userId, user.id)))
+          .returning({ id: platforms.id });
+        updatedId = row?.id;
         break;
+      }
     }
 
-    revalidateMasterConsumers();
+    if (!updatedId) {
+      return fail("not_found", "Master item not found");
+    }
+
+    revalidateMasterConsumers(user.id);
     return ok();
   } catch (err: unknown) {
     const pgErr = err as { code?: string };
@@ -442,20 +492,33 @@ export async function deleteMasterItem(
   tableType: MasterTableType,
   id: string
 ): Promise<ActionResult<void>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   try {
+    const tbl = getMasterTable(tableType);
+    const [existing] = await db
+      .select({ id: tbl.id })
+      .from(tbl)
+      .where(and(eq(tbl.id, id), eq(tbl.userId, user.id)))
+      .limit(1);
+
+    if (!existing) {
+      return fail("not_found", "Master item not found");
+    }
+
     switch (tableType) {
       case "pillars": {
         const [refUsage, contentUsage] = await Promise.all([
           db
             .select({ count: sql<number>`count(*)::int` })
             .from(refPillars)
-            .where(eq(refPillars.pillarId, id)),
+            .innerJoin(refs, eq(refPillars.refId, refs.id))
+            .where(and(eq(refPillars.pillarId, id), eq(refs.userId, user.id))),
           db
             .select({ count: sql<number>`count(*)::int` })
             .from(contentPillars)
-            .where(eq(contentPillars.pillarId, id)),
+            .innerJoin(contents, eq(contentPillars.contentId, contents.id))
+            .where(and(eq(contentPillars.pillarId, id), eq(contents.userId, user.id))),
         ]);
         const totalUsed = (refUsage[0]?.count || 0) + (contentUsage[0]?.count || 0);
         if (totalUsed > 0) {
@@ -464,21 +527,21 @@ export async function deleteMasterItem(
             `Cannot delete: Pillar is currently used by ${totalUsed} reference(s) or content(s). Deactivate it instead.`
           );
         }
-        await db.delete(pillars).where(eq(pillars.id, id));
+        await db.delete(pillars).where(and(eq(pillars.id, id), eq(pillars.userId, user.id)));
         break;
       }
       case "series": {
         const [usage] = await db
           .select({ count: sql<number>`count(*)::int` })
           .from(contents)
-          .where(eq(contents.seriesId, id));
+          .where(and(eq(contents.seriesId, id), eq(contents.userId, user.id)));
         if ((usage?.count || 0) > 0) {
           return fail(
             "blocked",
             `Cannot delete: Series is in use by ${usage.count} content(s). Deactivate it instead.`
           );
         }
-        await db.delete(series).where(eq(series.id, id));
+        await db.delete(series).where(and(eq(series.id, id), eq(series.userId, user.id)));
         break;
       }
       case "formats": {
@@ -486,11 +549,11 @@ export async function deleteMasterItem(
           db
             .select({ count: sql<number>`count(*)::int` })
             .from(refs)
-            .where(eq(refs.formatId, id)),
+            .where(and(eq(refs.formatId, id), eq(refs.userId, user.id))),
           db
             .select({ count: sql<number>`count(*)::int` })
             .from(contents)
-            .where(eq(contents.formatId, id)),
+            .where(and(eq(contents.formatId, id), eq(contents.userId, user.id))),
         ]);
         const totalUsed = (refUsage[0]?.count || 0) + (contentUsage[0]?.count || 0);
         if (totalUsed > 0) {
@@ -499,7 +562,7 @@ export async function deleteMasterItem(
             `Cannot delete: Format is in use by ${totalUsed} item(s). Deactivate it instead.`
           );
         }
-        await db.delete(formats).where(eq(formats.id, id));
+        await db.delete(formats).where(and(eq(formats.id, id), eq(formats.userId, user.id)));
         break;
       }
       case "hookTypes": {
@@ -507,11 +570,11 @@ export async function deleteMasterItem(
           db
             .select({ count: sql<number>`count(*)::int` })
             .from(refs)
-            .where(eq(refs.hookTypeId, id)),
+            .where(and(eq(refs.hookTypeId, id), eq(refs.userId, user.id))),
           db
             .select({ count: sql<number>`count(*)::int` })
             .from(contents)
-            .where(eq(contents.hookTypeId, id)),
+            .where(and(eq(contents.hookTypeId, id), eq(contents.userId, user.id))),
         ]);
         const totalUsed = (refUsage[0]?.count || 0) + (contentUsage[0]?.count || 0);
         if (totalUsed > 0) {
@@ -520,7 +583,7 @@ export async function deleteMasterItem(
             `Cannot delete: Hook type is in use by ${totalUsed} item(s). Deactivate it instead.`
           );
         }
-        await db.delete(hookTypes).where(eq(hookTypes.id, id));
+        await db.delete(hookTypes).where(and(eq(hookTypes.id, id), eq(hookTypes.userId, user.id)));
         break;
       }
       case "platforms": {
@@ -528,11 +591,11 @@ export async function deleteMasterItem(
           db
             .select({ count: sql<number>`count(*)::int` })
             .from(refs)
-            .where(eq(refs.platformId, id)),
+            .where(and(eq(refs.platformId, id), eq(refs.userId, user.id))),
           db
             .select({ count: sql<number>`count(*)::int` })
             .from(posts)
-            .where(eq(posts.platformId, id)),
+            .where(and(eq(posts.platformId, id), eq(posts.userId, user.id))),
         ]);
         const totalUsed = (refUsage[0]?.count || 0) + (postUsage[0]?.count || 0);
         if (totalUsed > 0) {
@@ -541,12 +604,12 @@ export async function deleteMasterItem(
             `Cannot delete: Platform is in use by ${totalUsed} item(s). Deactivate it instead.`
           );
         }
-        await db.delete(platforms).where(eq(platforms.id, id));
+        await db.delete(platforms).where(and(eq(platforms.id, id), eq(platforms.userId, user.id)));
         break;
       }
     }
 
-    revalidateMasterConsumers();
+    revalidateMasterConsumers(user.id);
     return ok();
   } catch (err) {
     console.error(`Error deleting master item ${tableType}:`, err);
@@ -562,7 +625,7 @@ export async function reorderMasterItem(
   id: string,
   direction: "up" | "down"
 ): Promise<ActionResult<{ orderedIds: string[] }>> {
-  await requireActionOwner();
+  const user = await requireActionOwner();
 
   try {
     const tbl = getMasterTable(tableType);
@@ -570,6 +633,7 @@ export async function reorderMasterItem(
       const rows = await tx
         .select({ id: tbl.id })
         .from(tbl)
+        .where(eq(tbl.userId, user.id))
         .orderBy(asc(tbl.sortOrder), asc(tbl.name));
 
       const idx = rows.findIndex((r) => r.id === id);
@@ -588,13 +652,13 @@ export async function reorderMasterItem(
         await tx
           .update(tbl)
           .set({ sortOrder: i + 1 })
-          .where(eq(tbl.id, nextRows[i].id));
+          .where(and(eq(tbl.id, nextRows[i].id), eq(tbl.userId, user.id)));
       }
 
       return nextRows.map((r) => r.id);
     });
 
-    revalidateMasterConsumers();
+    revalidateMasterConsumers(user.id);
     return ok({ orderedIds });
   } catch (err) {
     console.error(`Error reordering master item ${tableType}:`, err);

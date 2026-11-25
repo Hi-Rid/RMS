@@ -41,22 +41,25 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const computedHash = crypto.createHash("sha256").update(token).digest("hex");
+
   const [settings] = await db
-    .select({ ingestTokenHash: appSettings.ingestTokenHash })
+    .select({
+      userId: appSettings.userId,
+      ingestTokenHash: appSettings.ingestTokenHash,
+    })
     .from(appSettings)
-    .where(eq(appSettings.id, 1))
+    .where(eq(appSettings.ingestTokenHash, computedHash))
     .limit(1);
 
   if (!settings?.ingestTokenHash) {
     return NextResponse.json(
-      { ok: false, error: { code: "unauthorized", message: "Ingest token is not configured in settings" } },
+      { ok: false, error: { code: "unauthorized", message: "Invalid ingest token" } },
       { status: 401, headers: CORS_HEADERS }
     );
   }
 
-  const computedHash = crypto.createHash("sha256").update(token).digest("hex");
   const storedHash = settings.ingestTokenHash;
-
   const valid =
     computedHash.length === storedHash.length &&
     crypto.timingSafeEqual(Buffer.from(computedHash), Buffer.from(storedHash));
@@ -67,6 +70,8 @@ export async function POST(request: NextRequest) {
       { status: 401, headers: CORS_HEADERS }
     );
   }
+
+  const userId = settings.userId;
 
   // 2. Parse payload (max 100 KB limit, PRD §11.1)
   const contentType = request.headers.get("content-type") || "";
@@ -121,10 +126,11 @@ export async function POST(request: NextRequest) {
     const targetUrl = cappedUrls[0];
     try {
       const normalized = await normalizeUrl(targetUrl);
-      const platformId = await getPlatformIdBySlug(normalized.platform);
-      const formatId = await getFormatIdBySlug(normalized.format);
+      const platformId = await getPlatformIdBySlug(normalized.platform, userId);
+      const formatId = await getFormatIdBySlug(normalized.format, userId);
 
       const record = await createReferenceRecord({
+        userId,
         url: normalized.url,
         urlOriginal: targetUrl,
         platformId,
@@ -134,6 +140,7 @@ export async function POST(request: NextRequest) {
 
       // Audit log
       await db.insert(systemLogs).values({
+        userId,
         kind: "ingest",
         level: "info",
         message: `Ingest: ${record.isDuplicate ? "duplicate" : "created"} ${normalized.platform} reference`,
@@ -180,10 +187,11 @@ export async function POST(request: NextRequest) {
   for (const raw of cappedUrls) {
     try {
       const normalized = await normalizeUrl(raw);
-      const platformId = await getPlatformIdBySlug(normalized.platform);
-      const formatId = await getFormatIdBySlug(normalized.format);
+      const platformId = await getPlatformIdBySlug(normalized.platform, userId);
+      const formatId = await getFormatIdBySlug(normalized.format, userId);
 
       const record = await createReferenceRecord({
+        userId,
         url: normalized.url,
         urlOriginal: raw,
         platformId,
@@ -209,6 +217,7 @@ export async function POST(request: NextRequest) {
 
   // Audit log
   await db.insert(systemLogs).values({
+    userId,
     kind: "ingest",
     level: "info",
     message: `Ingest batch: ${results.length} URLs processed`,

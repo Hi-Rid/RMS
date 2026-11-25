@@ -1,6 +1,7 @@
 import "server-only";
 import { sql, eq, isNull, desc, asc, and } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { getOwner } from "@/lib/auth/owner";
 import {
   contents,
   posts,
@@ -68,6 +69,31 @@ export interface InsightData {
   };
   curves: CheckpointCurveItem[];
 }
+
+const EMPTY_INSIGHT: InsightData = {
+  insightMinSample: 3,
+  summary: {
+    medianViews: 0,
+    measuredContentsCount: 0,
+    originalContentsCount: 0,
+    referencedContentsCount: 0,
+    unusedRefsCount: 0,
+    unusedAudiosCount: 0,
+  },
+  rankings: {
+    pillars: [],
+    formats: [],
+    hooks: [],
+    sources: [],
+    audio: [],
+    series: [],
+  },
+  outliers: {
+    high: [],
+    low: [],
+  },
+  curves: [],
+};
 
 function calcMedian(nums: number[]): number {
   if (nums.length === 0) return 0;
@@ -139,8 +165,11 @@ function buildRankings(
   });
 }
 
-export async function getInsightData(): Promise<InsightData> {
+export async function getInsightData(explicitUserId?: string): Promise<InsightData> {
   try {
+    const userId = explicitUserId ?? (await getOwner())?.id;
+    if (!userId) return EMPTY_INSIGHT;
+
     const [
       [settings],
       snapshotRows,
@@ -156,7 +185,7 @@ export async function getInsightData(): Promise<InsightData> {
       db
         .select({ insightMinSample: appSettings.insightMinSample })
         .from(appSettings)
-        .where(eq(appSettings.id, 1))
+        .where(eq(appSettings.userId, userId))
         .limit(1)
         .catch(() => []),
 
@@ -169,7 +198,13 @@ export async function getInsightData(): Promise<InsightData> {
         .from(snapshots)
         .innerJoin(posts, eq(snapshots.postId, posts.id))
         .innerJoin(contents, eq(posts.contentId, contents.id))
-        .where(and(eq(snapshots.status, "done"), isNull(contents.archivedAt))),
+        .where(
+          and(
+            eq(snapshots.userId, userId),
+            eq(snapshots.status, "done"),
+            isNull(contents.archivedAt)
+          )
+        ),
 
       db
         .select({
@@ -180,20 +215,21 @@ export async function getInsightData(): Promise<InsightData> {
           seriesName: series.name,
           audioTitle: audios.title,
           audioArtist: audios.artist,
-          hasRefs: sql<boolean>`EXISTS (SELECT 1 FROM ${refs} WHERE ${refs.contentId} = ${contents.id} AND ${refs.archivedAt} IS NULL)`,
+          hasRefs: sql<boolean>`EXISTS (SELECT 1 FROM ${refs} WHERE ${refs.contentId} = ${contents.id} AND ${refs.userId} = ${userId} AND ${refs.archivedAt} IS NULL)`,
         })
         .from(contents)
         .leftJoin(formats, eq(contents.formatId, formats.id))
         .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
         .leftJoin(series, eq(contents.seriesId, series.id))
         .leftJoin(audios, eq(contents.audioId, audios.id))
-        .where(isNull(contents.archivedAt)),
+        .where(and(eq(contents.userId, userId), isNull(contents.archivedAt))),
 
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(refs)
         .where(
           and(
+            eq(refs.userId, userId),
             isNull(refs.contentId),
             isNull(refs.archivedAt),
             sql`${refs.status} != 'skipped'`
@@ -204,7 +240,10 @@ export async function getInsightData(): Promise<InsightData> {
         .select({ count: sql<number>`count(*)::int` })
         .from(audios)
         .where(
-          sql`NOT EXISTS (SELECT 1 FROM ${contents} WHERE ${contents.audioId} = ${audios.id} AND ${contents.archivedAt} IS NULL)`
+          and(
+            eq(audios.userId, userId),
+            sql`NOT EXISTS (SELECT 1 FROM ${contents} WHERE ${contents.audioId} = ${audios.id} AND ${contents.userId} = ${userId} AND ${contents.archivedAt} IS NULL)`
+          )
         ),
 
       db
@@ -216,7 +255,7 @@ export async function getInsightData(): Promise<InsightData> {
         .from(contentPillars)
         .innerJoin(pillars, eq(contentPillars.pillarId, pillars.id))
         .innerJoin(contents, eq(contentPillars.contentId, contents.id))
-        .where(isNull(contents.archivedAt)),
+        .where(and(eq(contents.userId, userId), isNull(contents.archivedAt))),
 
       db
         .select({
@@ -227,7 +266,7 @@ export async function getInsightData(): Promise<InsightData> {
         .from(refs)
         .innerJoin(sourceAccounts, eq(refs.sourceAccountId, sourceAccounts.id))
         .innerJoin(contents, eq(refs.contentId, contents.id))
-        .where(and(isNull(refs.archivedAt), isNull(contents.archivedAt))),
+        .where(and(eq(refs.userId, userId), isNull(refs.archivedAt), isNull(contents.archivedAt))),
 
       db
         .select({
@@ -241,7 +280,13 @@ export async function getInsightData(): Promise<InsightData> {
         .from(contents)
         .leftJoin(formats, eq(contents.formatId, formats.id))
         .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
-        .where(and(isNull(contents.archivedAt), sql`${contents.finalRating} IS NOT NULL`))
+        .where(
+          and(
+            eq(contents.userId, userId),
+            isNull(contents.archivedAt),
+            sql`${contents.finalRating} IS NOT NULL`
+          )
+        )
         .orderBy(desc(contents.finalRating))
         .limit(5),
 
@@ -257,7 +302,13 @@ export async function getInsightData(): Promise<InsightData> {
         .from(contents)
         .leftJoin(formats, eq(contents.formatId, formats.id))
         .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
-        .where(and(isNull(contents.archivedAt), sql`${contents.finalRating} IS NOT NULL`))
+        .where(
+          and(
+            eq(contents.userId, userId),
+            isNull(contents.archivedAt),
+            sql`${contents.finalRating} IS NOT NULL`
+          )
+        )
         .orderBy(asc(contents.finalRating))
         .limit(5),
 
@@ -273,14 +324,19 @@ export async function getInsightData(): Promise<InsightData> {
         .innerJoin(posts, eq(posts.contentId, contents.id))
         .innerJoin(platforms, eq(posts.platformId, platforms.id))
         .innerJoin(snapshots, eq(snapshots.postId, posts.id))
-        .where(and(isNull(contents.archivedAt), eq(snapshots.status, "done")))
+        .where(
+          and(
+            eq(contents.userId, userId),
+            isNull(contents.archivedAt),
+            eq(snapshots.status, "done")
+          )
+        )
         .orderBy(desc(contents.createdAt))
         .limit(30),
     ]);
 
     const insightMinSample = settings?.insightMinSample ?? 3;
 
-    // Max views per content across completed snapshots + overall snapshot median
     const contentMaxViews = new Map<string, number>();
     const allViews: number[] = [];
     const measuredContentIds = new Set<string>();
@@ -303,7 +359,6 @@ export async function getInsightData(): Promise<InsightData> {
     const unusedRefsCount = unusedRefsRes[0]?.count || 0;
     const unusedAudiosCount = unusedAudiosRes[0]?.count || 0;
 
-    // Build all 6 dimension rankings with true avgRating + true medianViews + dynamic minSample
     const pillarRankings = buildRankings(
       pillarContentRows.map((r) => ({
         key: r.pillarName,
@@ -372,7 +427,6 @@ export async function getInsightData(): Promise<InsightData> {
       insightMinSample
     );
 
-    // Group checkpoint curves by content + platform
     const curveMap = new Map<string, CheckpointCurveItem>();
     for (const row of curveContents) {
       const key = `${row.contentId}-${row.platformName}`;
@@ -418,29 +472,6 @@ export async function getInsightData(): Promise<InsightData> {
     };
   } catch (error) {
     console.warn("Failed to get insight data:", error);
-    return {
-      insightMinSample: 3,
-      summary: {
-        medianViews: 0,
-        measuredContentsCount: 0,
-        originalContentsCount: 0,
-        referencedContentsCount: 0,
-        unusedRefsCount: 0,
-        unusedAudiosCount: 0,
-      },
-      rankings: {
-        pillars: [],
-        formats: [],
-        hooks: [],
-        sources: [],
-        audio: [],
-        series: [],
-      },
-      outliers: {
-        high: [],
-        low: [],
-      },
-      curves: [],
-    };
+    return EMPTY_INSIGHT;
   }
 }

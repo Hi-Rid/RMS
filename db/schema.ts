@@ -16,6 +16,7 @@ export const schemaMigrations = pgTable("schema_migrations", {
 
 export const platforms = pgTable("platforms", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	name: text().notNull(),
 	slug: text().notNull(),
 	domains: text().array().default([""]).notNull(),
@@ -26,31 +27,35 @@ export const platforms = pgTable("platforms", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	uniqueIndex("platforms_name_uq").using("btree", sql`lower(btrim(name))`),
-	unique("platforms_slug_key").on(table.slug),
+	index("platforms_user_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+	uniqueIndex("platforms_user_name_uq").using("btree", table.userId, sql`lower(btrim(name))`),
+	unique("platforms_user_slug_uq").on(table.userId, table.slug),
 	check("platforms_name_check", sql`(length(btrim(name)) >= 1) AND (length(btrim(name)) <= 60)`),
 ]);
 
 export const sourceAccounts = pgTable("source_accounts", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	platformId: uuid("platform_id").notNull(),
 	handle: text().notNull(),
 	notes: text(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
+	index("source_accounts_user_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
 	index("source_accounts_handle_trgm").using("gin", table.handle.asc().nullsLast().op("gin_trgm_ops")),
 	foreignKey({
 			columns: [table.platformId],
 			foreignColumns: [platforms.id],
 			name: "source_accounts_platform_id_fkey"
 		}).onDelete("restrict"),
-	unique("source_accounts_platform_id_handle_key").on(table.platformId, table.handle),
+	unique("source_accounts_user_platform_handle_uq").on(table.userId, table.platformId, table.handle),
 	check("source_accounts_handle_check", sql`(handle = lower(btrim(handle))) AND (handle !~ '^@'::text) AND ((length(handle) >= 1) AND (length(handle) <= 100))`),
 ]);
 
 export const formats = pgTable("formats", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	name: text().notNull(),
 	slug: text().notNull(),
 	hasCheckpoints: boolean("has_checkpoints").default(true).notNull(),
@@ -59,13 +64,15 @@ export const formats = pgTable("formats", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	uniqueIndex("formats_name_uq").using("btree", sql`lower(btrim(name))`),
-	unique("formats_slug_key").on(table.slug),
+	index("formats_user_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+	uniqueIndex("formats_user_name_uq").using("btree", table.userId, sql`lower(btrim(name))`),
+	unique("formats_user_slug_uq").on(table.userId, table.slug),
 	check("formats_name_check", sql`(length(btrim(name)) >= 1) AND (length(btrim(name)) <= 60)`),
 ]);
 
 export const contents = pgTable("contents", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	title: text().notNull(),
 	status: contentStatus().default('production').notNull(),
 	formatId: uuid("format_id"),
@@ -89,6 +96,7 @@ export const contents = pgTable("contents", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
+	index("contents_user_created_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops"), table.createdAt.desc().nullsFirst().op("timestamptz_ops")),
 	index("contents_audio_idx").using("btree", table.audioId.asc().nullsLast().op("uuid_ops")),
 	index("contents_created_idx").using("btree", table.createdAt.desc().nullsFirst().op("timestamptz_ops")),
 	index("contents_embedding_idx").using("hnsw", table.embedding.asc().nullsLast().op("vector_cosine_ops")),
@@ -125,6 +133,7 @@ export const contents = pgTable("contents", {
 
 export const series = pgTable("series", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	name: text().notNull(),
 	slug: text().notNull(),
 	sortOrder: integer("sort_order").default(0).notNull(),
@@ -132,13 +141,15 @@ export const series = pgTable("series", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	uniqueIndex("series_name_uq").using("btree", sql`lower(btrim(name))`),
-	unique("series_slug_key").on(table.slug),
+	index("series_user_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+	uniqueIndex("series_user_name_uq").using("btree", table.userId, sql`lower(btrim(name))`),
+	unique("series_user_slug_uq").on(table.userId, table.slug),
 	check("series_name_check", sql`(length(btrim(name)) >= 1) AND (length(btrim(name)) <= 60)`),
 ]);
 
 export const audios = pgTable("audios", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	title: text().notNull(),
 	artist: text().default("").notNull(),
 	isOriginal: boolean("is_original").default(false).notNull(),
@@ -146,7 +157,8 @@ export const audios = pgTable("audios", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	uniqueIndex("audios_title_artist_uq").using("btree", sql`lower(btrim(title))`, sql`lower(btrim(artist))`),
+	index("audios_user_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+	uniqueIndex("audios_user_title_artist_uq").using("btree", table.userId, sql`lower(btrim(title))`, sql`lower(btrim(artist))`),
 	index("audios_title_trgm").using("gin", table.title.asc().nullsLast().op("gin_trgm_ops")),
 	check("audios_artist_check", sql`length(artist) <= 200`),
 	check("audios_title_check", sql`(length(btrim(title)) >= 1) AND (length(btrim(title)) <= 200)`),
@@ -154,6 +166,7 @@ export const audios = pgTable("audios", {
 
 export const hookTypes = pgTable("hook_types", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	name: text().notNull(),
 	slug: text().notNull(),
 	sortOrder: integer("sort_order").default(0).notNull(),
@@ -161,13 +174,15 @@ export const hookTypes = pgTable("hook_types", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	uniqueIndex("hook_types_name_uq").using("btree", sql`lower(btrim(name))`),
-	unique("hook_types_slug_key").on(table.slug),
+	index("hook_types_user_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+	uniqueIndex("hook_types_user_name_uq").using("btree", table.userId, sql`lower(btrim(name))`),
+	unique("hook_types_user_slug_uq").on(table.userId, table.slug),
 	check("hook_types_name_check", sql`(length(btrim(name)) >= 1) AND (length(btrim(name)) <= 60)`),
 ]);
 
 export const refs = pgTable("refs", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	url: text().notNull(),
 	urlOriginal: text("url_original").notNull(),
 	platformId: uuid("platform_id").notNull(),
@@ -197,18 +212,19 @@ export const refs = pgTable("refs", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
+	index("refs_user_saved_at_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops"), table.savedAt.desc().nullsFirst().op("timestamptz_ops")),
 	index("refs_audio_idx").using("btree", table.audioId.asc().nullsLast().op("uuid_ops")),
 	index("refs_content_idx").using("btree", table.contentId.asc().nullsLast().op("uuid_ops")),
 	index("refs_embedding_idx").using("hnsw", table.embedding.asc().nullsLast().op("vector_cosine_ops")),
 	index("refs_format_idx").using("btree", table.formatId.asc().nullsLast().op("uuid_ops")),
-	uniqueIndex("refs_platform_external_uq").using("btree", table.platformId.asc().nullsLast().op("text_ops"), table.externalId.asc().nullsLast().op("uuid_ops")).where(sql`(external_id IS NOT NULL)`),
+	uniqueIndex("refs_user_platform_external_uq").using("btree", table.userId, table.platformId, table.externalId).where(sql`(external_id IS NOT NULL)`),
 	index("refs_saved_at_idx").using("btree", table.savedAt.desc().nullsFirst().op("timestamptz_ops")),
 	index("refs_search_trgm").using("gin", table.searchText.asc().nullsLast().op("gin_trgm_ops")),
 	index("refs_source_idx").using("btree", table.sourceAccountId.asc().nullsLast().op("uuid_ops")),
 	index("refs_status_idx").using("btree", table.status.asc().nullsLast().op("enum_ops")).where(sql`(archived_at IS NULL)`),
 	index("refs_tags_gin").using("gin", table.tags.asc().nullsLast().op("array_ops")),
 	index("refs_unused_idx").using("btree", table.savedAt.desc().nullsFirst().op("timestamptz_ops")).where(sql`((content_id IS NULL) AND (archived_at IS NULL) AND (status <> 'skipped'::ref_status))`),
-	uniqueIndex("refs_url_uq").using("btree", table.url.asc().nullsLast().op("text_ops")),
+	uniqueIndex("refs_user_url_uq").using("btree", table.userId, table.url),
 	foreignKey({
 			columns: [table.audioId],
 			foreignColumns: [audios.id],
@@ -250,6 +266,7 @@ export const refs = pgTable("refs", {
 
 export const pillars = pgTable("pillars", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	name: text().notNull(),
 	slug: text().notNull(),
 	sortOrder: integer("sort_order").default(0).notNull(),
@@ -257,8 +274,9 @@ export const pillars = pgTable("pillars", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	uniqueIndex("pillars_name_uq").using("btree", sql`lower(btrim(name))`),
-	unique("pillars_slug_key").on(table.slug),
+	index("pillars_user_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+	uniqueIndex("pillars_user_name_uq").using("btree", table.userId, sql`lower(btrim(name))`),
+	unique("pillars_user_slug_uq").on(table.userId, table.slug),
 	check("pillars_name_check", sql`(length(btrim(name)) >= 1) AND (length(btrim(name)) <= 60)`),
 ]);
 
@@ -300,6 +318,7 @@ export const contentChecklist = pgTable("content_checklist", {
 
 export const posts = pgTable("posts", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	contentId: uuid("content_id").notNull(),
 	platformId: uuid("platform_id").notNull(),
 	url: text(),
@@ -308,6 +327,7 @@ export const posts = pgTable("posts", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
+	index("posts_user_posted_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops"), table.postedAt.desc().nullsFirst().op("timestamptz_ops")),
 	index("posts_content_idx").using("btree", table.contentId.asc().nullsLast().op("uuid_ops")),
 	index("posts_posted_idx").using("btree", table.postedAt.desc().nullsFirst().op("timestamptz_ops")),
 	foreignKey({
@@ -326,6 +346,7 @@ export const posts = pgTable("posts", {
 
 export const snapshots = pgTable("snapshots", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	postId: uuid("post_id").notNull(),
 	checkpoint: checkpointKind().notNull(),
 	dueAt: timestamp("due_at", { withTimezone: true, mode: 'string' }).notNull(),
@@ -346,6 +367,7 @@ export const snapshots = pgTable("snapshots", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
+	index("snapshots_user_due_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops"), table.dueAt.asc().nullsLast().op("timestamptz_ops")).where(sql`(status = 'pending'::snapshot_status)`),
 	index("snapshots_due_idx").using("btree", table.dueAt.asc().nullsLast().op("timestamptz_ops")).where(sql`(status = 'pending'::snapshot_status)`),
 	index("snapshots_post_idx").using("btree", table.postId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
@@ -369,6 +391,7 @@ export const snapshots = pgTable("snapshots", {
 
 export const snippets = pgTable("snippets", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	kind: snippetKind().notNull(),
 	title: text().notNull(),
 	body: text().notNull(),
@@ -379,6 +402,7 @@ export const snippets = pgTable("snippets", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
+	index("snippets_user_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
 			columns: [table.pillarId],
 			foreignColumns: [pillars.id],
@@ -394,8 +418,8 @@ export const snippets = pgTable("snippets", {
 ]);
 
 export const statusEvents = pgTable("status_events", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "status_events_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	userId: uuid("user_id"),
 	entity: text().notNull(),
 	entityId: uuid("entity_id").notNull(),
 	fromStatus: text("from_status"),
@@ -407,22 +431,23 @@ export const statusEvents = pgTable("status_events", {
 ]);
 
 export const systemLogs = pgTable("system_logs", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "system_logs_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	userId: uuid("user_id"),
 	kind: text().notNull(),
 	level: text().default('info').notNull(),
 	message: text().notNull(),
 	meta: jsonb().default({}).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
+	index("system_logs_user_created_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops"), table.createdAt.desc().nullsFirst().op("timestamptz_ops")),
 	index("system_logs_created_idx").using("btree", table.createdAt.desc().nullsFirst().op("timestamptz_ops")),
 	check("system_logs_kind_check", sql`kind = ANY (ARRAY['ingest'::text, 'cron'::text, 'email'::text, 'ai'::text, 'webhook'::text, 'import'::text, 'auth'::text])`),
 	check("system_logs_level_check", sql`level = ANY (ARRAY['info'::text, 'warn'::text, 'error'::text])`),
 ]);
 
 export const aiUsage = pgTable("ai_usage", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "ai_usage_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	userId: uuid("user_id").notNull(),
 	feature: text().notNull(),
 	provider: text().notNull(),
 	model: text().notNull(),
@@ -433,15 +458,17 @@ export const aiUsage = pgTable("ai_usage", {
 	error: text(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
+	index("ai_usage_user_created_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops"), table.createdAt.desc().nullsFirst().op("timestamptz_ops")),
 	index("ai_usage_created_idx").using("btree", table.createdAt.desc().nullsFirst().op("timestamptz_ops")),
 	check("ai_usage_status_check", sql`status = ANY (ARRAY['ok'::text, 'error'::text, 'rate_limited'::text, 'blocked_cap'::text])`),
 ]);
 
 export const appSettings = pgTable("app_settings", {
-	id: smallint().default(1).primaryKey().notNull(),
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
 	weeklyPostTarget: smallint("weekly_post_target").default(3).notNull(),
 	insightMinSample: smallint("insight_min_sample").default(3).notNull(),
-	defaultChecklist: text("default_checklist").array().default(["RAY['Script / outline'::text", "'Shoot or draw'::text", "'Edit'::text", "'Cover'::text", "'Caption and hashtags'::text", "'Audio checked'::tex"]).notNull(),
+	defaultChecklist: text("default_checklist").array().default(["Script / outline", "Shoot or draw", "Edit", "Cover", "Caption and hashtags", "Audio checked"]).notNull(),
 	ingestTokenHash: text("ingest_token_hash"),
 	ingestTokenHint: text("ingest_token_hint"),
 	ingestTokenRotatedAt: timestamp("ingest_token_rotated_at", { withTimezone: true, mode: 'string' }),
@@ -455,10 +482,11 @@ export const appSettings = pgTable("app_settings", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
+	unique("app_settings_user_id_uq").on(table.userId),
+	uniqueIndex("app_settings_ingest_token_hash_uq").using("btree", table.ingestTokenHash).where(sql`(ingest_token_hash IS NOT NULL)`),
 	check("app_settings_ai_daily_cap_check", sql`ai_daily_cap >= 0`),
 	check("app_settings_ai_output_language_check", sql`ai_output_language = ANY (ARRAY['id'::text, 'en'::text])`),
 	check("app_settings_ai_provider_check", sql`ai_provider = ANY (ARRAY['google'::text, 'groq'::text, 'openrouter'::text])`),
-	check("app_settings_id_check", sql`id = 1`),
 	check("app_settings_insight_min_sample_check", sql`insight_min_sample >= 1`),
 	check("app_settings_weekly_post_target_check", sql`(weekly_post_target >= 0) AND (weekly_post_target <= 50)`),
 ]);
@@ -510,38 +538,38 @@ export const contentPillars = pgTable("content_pillars", {
 		}).onDelete("restrict"),
 	primaryKey({ columns: [table.contentId, table.pillarId], name: "content_pillars_pkey"}),
 ]);
-export const tagCounts = pgView("tag_counts", {	tag: text(),
+
+export const tagCounts = pgView("tag_counts", {	userId: uuid("user_id"),
+	tag: text(),
 	uses: integer(),
-}).with({"securityInvoker":true}).as(sql`SELECT tag, count(*)::integer AS uses FROM ( SELECT unnest(refs.tags) AS tag FROM refs WHERE refs.archived_at IS NULL UNION ALL SELECT unnest(contents.tags) AS unnest FROM contents WHERE contents.archived_at IS NULL) t GROUP BY tag`);
+}).with({"securityInvoker":true}).as(sql`SELECT user_id, tag, count(*)::integer AS uses FROM ( SELECT refs.user_id, unnest(refs.tags) AS tag FROM refs WHERE refs.archived_at IS NULL UNION ALL SELECT contents.user_id, unnest(contents.tags) AS unnest FROM contents WHERE contents.archived_at IS NULL) t GROUP BY user_id, tag`);
 
 export const audioUsage = pgView("audio_usage", {	audioId: uuid("audio_id"),
+	userId: uuid("user_id"),
 	refCount: integer("ref_count"),
 	contentCount: integer("content_count"),
 	lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: 'string' }),
-}).with({"securityInvoker":true}).as(sql`SELECT id AS audio_id, (( SELECT count(*) AS count FROM refs r WHERE r.audio_id = a.id AND r.archived_at IS NULL))::integer AS ref_count, (( SELECT count(*) AS count FROM contents c WHERE c.audio_id = a.id AND c.archived_at IS NULL))::integer AS content_count, ( SELECT max(COALESCE(( SELECT max(p.posted_at) AS max FROM posts p WHERE p.content_id = c.id), c.created_at)) AS max FROM contents c WHERE c.audio_id = a.id AND c.archived_at IS NULL) AS last_used_at FROM audios a`);
+}).with({"securityInvoker":true}).as(sql`SELECT id AS audio_id, user_id, (( SELECT count(*) AS count FROM refs r WHERE r.audio_id = a.id AND r.archived_at IS NULL))::integer AS ref_count, (( SELECT count(*) AS count FROM contents c WHERE c.audio_id = a.id AND c.archived_at IS NULL))::integer AS content_count, ( SELECT max(COALESCE(( SELECT max(p.posted_at) AS max FROM posts p WHERE p.content_id = c.id), c.created_at)) AS max FROM contents c WHERE c.audio_id = a.id AND c.archived_at IS NULL) AS last_used_at FROM audios a`);
 
 export const contentScores = pgView("content_scores", {	contentId: uuid("content_id"),
+	userId: uuid("user_id"),
 	score: numeric(),
-}).with({"securityInvoker":true}).as(sql`SELECT id AS content_id, COALESCE(final_rating::numeric, ( SELECT avg(s.rating) AS avg FROM snapshots s JOIN posts p ON p.id = s.post_id WHERE p.content_id = c.id AND s.status = 'done'::snapshot_status AND s.rating IS NOT NULL)) AS score FROM contents c WHERE archived_at IS NULL`);
+}).with({"securityInvoker":true}).as(sql`SELECT id AS content_id, user_id, COALESCE(final_rating::numeric, ( SELECT avg(s.rating) AS avg FROM snapshots s JOIN posts p ON p.id = s.post_id WHERE p.content_id = c.id AND s.status = 'done'::snapshot_status AND s.rating IS NOT NULL)) AS score FROM contents c WHERE archived_at IS NULL`);
 
 export const contentMetrics = pgView("content_metrics", {	contentId: uuid("content_id"),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	userId: uuid("user_id"),
 	views: bigint({ mode: "number" }),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	likes: bigint({ mode: "number" }),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	comments: bigint({ mode: "number" }),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	saves: bigint({ mode: "number" }),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	shares: bigint({ mode: "number" }),
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	followerDelta: bigint("follower_delta", { mode: "number" }),
-}).with({"securityInvoker":true}).as(sql`SELECT p.content_id, sum(ls.views) AS views, sum(ls.likes) AS likes, sum(ls.comments) AS comments, sum(ls.saves) AS saves, sum(ls.shares) AS shares, sum(ls.follower_delta) AS follower_delta FROM posts p JOIN LATERAL ( SELECT s.id, s.post_id, s.checkpoint, s.due_at, s.status, s.views, s.likes, s.comments, s.saves, s.shares, s.follower_delta, s.reach, s.avg_watch_seconds, s.retention_pct, s.profile_visits, s.rating, s.notes, s.filled_at, s.created_at, s.updated_at FROM snapshots s WHERE s.post_id = p.id AND s.status = 'done'::snapshot_status ORDER BY s.due_at DESC, s.checkpoint DESC LIMIT 1) ls ON true GROUP BY p.content_id`);
+}).with({"securityInvoker":true}).as(sql`SELECT p.content_id, p.user_id, sum(ls.views) AS views, sum(ls.likes) AS likes, sum(ls.comments) AS comments, sum(ls.saves) AS saves, sum(ls.shares) AS shares, sum(ls.follower_delta) AS follower_delta FROM posts p JOIN LATERAL ( SELECT s.id, s.post_id, s.checkpoint, s.due_at, s.status, s.views, s.likes, s.comments, s.saves, s.shares, s.follower_delta, s.reach, s.avg_watch_seconds, s.retention_pct, s.profile_visits, s.rating, s.notes, s.filled_at, s.created_at, s.updated_at FROM snapshots s WHERE s.post_id = p.id AND s.status = 'done'::snapshot_status ORDER BY s.due_at DESC, s.checkpoint DESC LIMIT 1) ls ON true GROUP BY p.content_id, p.user_id`);
 
 export const sourceStats = pgView("source_stats", {	sourceAccountId: uuid("source_account_id"),
+	userId: uuid("user_id"),
 	refCount: integer("ref_count"),
 	selectedCount: integer("selected_count"),
 	producedCount: integer("produced_count"),
 	avgScore: numeric("avg_score"),
-}).with({"securityInvoker":true}).as(sql`SELECT sa.id AS source_account_id, count(r.id) FILTER (WHERE r.archived_at IS NULL)::integer AS ref_count, count(r.id) FILTER (WHERE r.archived_at IS NULL AND (r.status = ANY (ARRAY['selected'::ref_status, 'production'::ref_status, 'posted'::ref_status, 'evaluating'::ref_status])))::integer AS selected_count, count(r.id) FILTER (WHERE r.archived_at IS NULL AND r.content_id IS NOT NULL)::integer AS produced_count, ( SELECT avg(cs.score) AS avg FROM content_scores cs WHERE (cs.content_id IN ( SELECT r2.content_id FROM refs r2 WHERE r2.source_account_id = sa.id AND r2.content_id IS NOT NULL))) AS avg_score FROM source_accounts sa LEFT JOIN refs r ON r.source_account_id = sa.id GROUP BY sa.id`);
+}).with({"securityInvoker":true}).as(sql`SELECT sa.id AS source_account_id, sa.user_id, count(r.id) FILTER (WHERE r.archived_at IS NULL)::integer AS ref_count, count(r.id) FILTER (WHERE r.archived_at IS NULL AND (r.status = ANY (ARRAY['selected'::ref_status, 'production'::ref_status, 'posted'::ref_status, 'evaluating'::ref_status])))::integer AS selected_count, count(r.id) FILTER (WHERE r.archived_at IS NULL AND r.content_id IS NOT NULL)::integer AS produced_count, ( SELECT avg(cs.score) AS avg FROM content_scores cs WHERE (cs.content_id IN ( SELECT r2.content_id FROM refs r2 WHERE r2.source_account_id = sa.id AND r2.content_id IS NOT NULL))) AS avg_score FROM source_accounts sa LEFT JOIN refs r ON r.source_account_id = sa.id GROUP BY sa.id, sa.user_id`);
