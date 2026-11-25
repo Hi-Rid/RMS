@@ -33,6 +33,11 @@ export interface AppSettingsQuery {
   aiEmbedModel: string | null;
   aiDailyCap: number;
   aiOutputLanguage: string;
+  aiAutoEnrich: boolean;
+  aiIngestMode: "inbox" | "selected" | "auto_draft";
+  creatorNiche: string | null;
+  creatorAudience: string | null;
+  creatorVoice: string | null;
   aiUsedToday: number;
 }
 
@@ -50,6 +55,11 @@ const DEFAULT_SETTINGS_RETURN: AppSettingsQuery = {
   aiEmbedModel: null,
   aiDailyCap: 100,
   aiOutputLanguage: "id",
+  aiAutoEnrich: true,
+  aiIngestMode: "inbox",
+  creatorNiche: null,
+  creatorAudience: null,
+  creatorVoice: null,
   aiUsedToday: 0,
 };
 
@@ -90,6 +100,12 @@ export async function getAppSettings(explicitUserId?: string): Promise<AppSettin
       aiEmbedModel: settings?.aiEmbedModel ?? null,
       aiDailyCap: settings?.aiDailyCap ?? 100,
       aiOutputLanguage: settings?.aiOutputLanguage ?? "id",
+      aiAutoEnrich: settings?.aiAutoEnrich ?? true,
+      aiIngestMode:
+        (settings?.aiIngestMode as "inbox" | "selected" | "auto_draft" | undefined) ?? "inbox",
+      creatorNiche: settings?.creatorNiche ?? null,
+      creatorAudience: settings?.creatorAudience ?? null,
+      creatorVoice: settings?.creatorVoice ?? null,
       aiUsedToday: Number(usageTodayRes?.count) || 0,
     };
   } catch (err) {

@@ -19,5 +19,11 @@ export default async function ReferenceDetailPage({ params }: ReferencePageProps
     notFound();
   }
 
-  return <ReferenceDetailClient reference={reference} masterData={masterData} />;
+  return (
+    <ReferenceDetailClient
+      key={`${reference.id}:${reference.summary ?? ""}:${reference.hookText ?? ""}:${reference.contentId ?? ""}`}
+      reference={reference}
+      masterData={masterData}
+    />
+  );
 }

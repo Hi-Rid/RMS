@@ -4,6 +4,7 @@ import { z } from "zod";
 import { generateText, Output } from "ai";
 import { db } from "@/lib/db";
 import { aiUsage } from "@/db/schema";
+import { buildCreatorPersonaPrompt } from "@/lib/ai/agent";
 import { getGoogleClient, runWithModelFallback } from "@/lib/ai/client";
 import { getAppSettings } from "@/lib/queries/settings";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
@@ -55,10 +56,14 @@ async function executeWithAiGuard<T>(
     );
   }
 
-  const langInstruction =
+  const baseInstruction =
     settings.aiOutputLanguage === "en"
-      ? "Write the ENTIRE output strictly in natural, sharp English suitable for a solo content creator."
-      : "Tulis SELURUH output MENGGUNAKAN BAHASA INDONESIA yang kasual, tajam, dan aplikatif untuk solo content creator.";
+      ? "Write the ENTIRE output strictly in natural, sharp English acting as the user's personal Content Strategist & Creative Agent."
+      : "Tulis SELURUH output MENGGUNAKAN BAHASA INDONESIA yang kasual, tajam, dan aplikatif sebagai Agen Konten Pribadi user.";
+  const personaPrompt = buildCreatorPersonaPrompt(settings);
+  const langInstruction = personaPrompt
+    ? `${baseInstruction}\n\n${personaPrompt}`
+    : baseInstruction;
 
   const start = Date.now();
   let usedModel = settings.aiTextModel || "gemini-flash-lite-latest";

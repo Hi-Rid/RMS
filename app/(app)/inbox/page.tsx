@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Inbox, Play, CheckCheck, Plus } from "lucide-react";
 import { AddLinksDialog } from "@/components/app/add-links-dialog";
 import { InboxBookmarkletIngest } from "@/components/app/inbox-bookmarklet-ingest";
+import { InboxEnrichButton } from "./inbox-enrich-button";
 
 export const instant = false;
 
@@ -42,7 +43,9 @@ export default async function InboxPage({ searchParams }: InboxPageProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {count > 0 && <InboxEnrichButton />}
+
           <AddLinksDialog>
             <Button
               variant="outline"

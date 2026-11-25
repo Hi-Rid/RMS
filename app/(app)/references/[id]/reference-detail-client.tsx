@@ -39,6 +39,7 @@ import {
   archiveReference,
   deleteReferencePermanently,
   setReferenceStatus,
+  enrichReferenceWithAgent,
 } from "@/lib/actions/references";
 import { aiBedahReference } from "@/lib/actions/ai";
 import { matchHookTypeId } from "@/lib/domain/normalize";
@@ -69,6 +70,30 @@ export function ReferenceDetailClient({
   // Active tab: "capture" | "bedah"
   const [tab, setTab] = useState<"capture" | "bedah">("capture");
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isAgentLoading, setIsAgentLoading] = useState(false);
+
+  const handleAutoEnrich = async () => {
+    setIsAgentLoading(true);
+    try {
+      const res = await enrichReferenceWithAgent({ id: reference.id });
+      if (!res.ok) {
+        toast.error(res.error.message);
+        return;
+      }
+      if (res.data.draftContentTitle) {
+        toast.success(`AI Agent enriched & drafted "${res.data.draftContentTitle}" in Studio!`);
+      } else if (res.data.enriched) {
+        toast.success("AI Agent populated summary, hook, pillars & strategy notes!");
+      } else {
+        toast.info("Metadata refreshed from source.");
+      }
+      router.refresh();
+    } catch {
+      toast.error("Failed to run AI Content Agent");
+    } finally {
+      setIsAgentLoading(false);
+    }
+  };
 
   const [aiIdeas, setAiIdeas] = useState<string[]>(() => {
     if (!reference.notes) return [];
@@ -266,15 +291,43 @@ export function ReferenceDetailClient({
             </Button>
           )}
 
-          <Link href={`/contents/new?refId=${reference.id}`}>
-            <Button
-              size="sm"
-              className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5"
-            >
-              <Plus className="size-3.5" />
-              <span>Create Content</span>
-            </Button>
-          </Link>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isAgentLoading || isPending}
+            onClick={handleAutoEnrich}
+            className="text-xs font-mono h-8 border-primary/30 text-primary hover:bg-primary/5 gap-1.5"
+          >
+            {isAgentLoading ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="size-3.5" />
+            )}
+            <span>{isAgentLoading ? "Running Agent..." : "AI Auto-Fill"}</span>
+          </Button>
+
+          {reference.contentId ? (
+            <Link href={`/contents/${reference.contentId}`}>
+              <Button
+                size="sm"
+                className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5"
+              >
+                <ExternalLink className="size-3.5" />
+                <span>Open Content Draft</span>
+              </Button>
+            </Link>
+          ) : (
+            <Link href={`/contents/new?refId=${reference.id}`}>
+              <Button
+                size="sm"
+                className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5"
+              >
+                <Plus className="size-3.5" />
+                <span>Create Content</span>
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
 

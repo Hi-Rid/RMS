@@ -125,6 +125,11 @@ const aiSettingsSchema = z.object({
   aiVisionModel: z.string().optional().nullable(),
   aiDailyCap: z.number().min(0).max(5000),
   aiOutputLanguage: z.enum(["id", "en"]),
+  aiAutoEnrich: z.boolean().optional(),
+  aiIngestMode: z.enum(["inbox", "selected", "auto_draft"]).optional(),
+  creatorNiche: z.string().trim().max(240).optional().nullable(),
+  creatorAudience: z.string().trim().max(240).optional().nullable(),
+  creatorVoice: z.string().trim().max(240).optional().nullable(),
 });
 
 export async function updateAiSettings(
@@ -147,12 +152,28 @@ export async function updateAiSettings(
         aiVisionModel: parsed.data.aiVisionModel?.trim() || null,
         aiDailyCap: parsed.data.aiDailyCap,
         aiOutputLanguage: parsed.data.aiOutputLanguage,
+        ...(parsed.data.aiAutoEnrich !== undefined
+          ? { aiAutoEnrich: parsed.data.aiAutoEnrich }
+          : {}),
+        ...(parsed.data.aiIngestMode !== undefined
+          ? { aiIngestMode: parsed.data.aiIngestMode }
+          : {}),
+        ...(parsed.data.creatorNiche !== undefined
+          ? { creatorNiche: parsed.data.creatorNiche?.trim() || null }
+          : {}),
+        ...(parsed.data.creatorAudience !== undefined
+          ? { creatorAudience: parsed.data.creatorAudience?.trim() || null }
+          : {}),
+        ...(parsed.data.creatorVoice !== undefined
+          ? { creatorVoice: parsed.data.creatorVoice?.trim() || null }
+          : {}),
         updatedAt: sql`now()`,
       })
       .where(eq(appSettings.userId, user.id));
 
     revalidatePath("/settings");
     revalidatePath("/references");
+    revalidatePath("/inbox");
     revalidatePath("/contents");
     revalidatePath("/insight");
 

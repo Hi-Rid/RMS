@@ -9,6 +9,11 @@ import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
 import { normalizeUrl, extractUrls } from "@/lib/domain/url";
 import { normalizeHandle, normalizeTag } from "@/lib/domain/normalize";
+import {
+  enrichInboxBatchForUser,
+  enrichReferenceById,
+  runAiAgentForReference,
+} from "@/lib/ai/agent";
 import { isAllowedRefTransition } from "@/lib/domain/status";
 import {
   getPlatformIdBySlug,
@@ -37,6 +42,10 @@ export interface ReferenceCreationResult {
   status: "created" | "duplicate";
   id: string;
   archived?: boolean;
+  enriched?: boolean;
+  summary?: string | null;
+  draftContentId?: string | null;
+  draftContentTitle?: string | null;
 }
 
 /**
@@ -66,14 +75,33 @@ export async function createReferenceFromUrl(
       formatId,
     });
 
+    const agentRes = !record.isDuplicate
+      ? await runAiAgentForReference({
+          userId: user.id,
+          refId: record.id,
+          url: normalized.url,
+          platformSlug: normalized.platform,
+          rawInput: parsed.data.input.trim(),
+          urlHandle: normalized.handle,
+          externalId: normalized.externalId,
+        }).catch(() => null)
+      : null;
+
     revalidatePath("/");
     revalidatePath("/inbox");
     revalidatePath("/references");
+    revalidatePath("/contents");
+    revalidatePath("/sources");
+    revalidatePath("/audio");
 
     return ok({
       status: record.isDuplicate ? "duplicate" : "created",
       id: record.id,
       archived: record.archived,
+      enriched: agentRes?.enriched ?? false,
+      summary: agentRes?.summary ?? null,
+      draftContentId: agentRes?.draftContentId ?? null,
+      draftContentTitle: agentRes?.draftContentTitle ?? null,
     });
   } catch (err: unknown) {
     const e = err as { code?: string; message?: string };
@@ -120,6 +148,7 @@ export async function createReferencesFromText(
   const urlsToProcess = rawUrls.slice(0, 50);
   const results: BatchItemResult[] = [];
   let createdCount = 0;
+  let enrichedBatchCount = 0;
 
   for (const raw of urlsToProcess) {
     try {
@@ -136,8 +165,21 @@ export async function createReferencesFromText(
         formatId,
       });
 
+      let agentRes = null;
       if (!record.isDuplicate) {
         createdCount++;
+        if (enrichedBatchCount < 5) {
+          enrichedBatchCount++;
+          agentRes = await runAiAgentForReference({
+            userId: user.id,
+            refId: record.id,
+            url: normalized.url,
+            platformSlug: normalized.platform,
+            rawInput: urlsToProcess.length === 1 ? parsed.data.text : raw,
+            urlHandle: normalized.handle,
+            externalId: normalized.externalId,
+          }).catch(() => null);
+        }
       }
 
       results.push({
@@ -148,7 +190,11 @@ export async function createReferencesFromText(
           ? record.archived
             ? "Already saved (archived)"
             : "Already in references"
-          : "Saved to inbox",
+          : agentRes?.draftContentTitle
+            ? `AI drafted Content: ${agentRes.draftContentTitle}`
+            : agentRes?.enriched
+              ? "Saved & AI enriched"
+              : "Saved to inbox",
       });
     } catch {
       results.push({
@@ -162,6 +208,9 @@ export async function createReferencesFromText(
   revalidatePath("/");
   revalidatePath("/inbox");
   revalidatePath("/references");
+  revalidatePath("/contents");
+  revalidatePath("/sources");
+  revalidatePath("/audio");
 
   return ok({
     results,
@@ -265,6 +314,7 @@ export async function importReferencesFromUrls(
 
   let created = 0;
   let duplicates = 0;
+  let enrichedImportCount = 0;
 
   for (const url of parsed.data.urls) {
     try {
@@ -285,6 +335,18 @@ export async function importReferencesFromUrls(
         duplicates++;
       } else {
         created++;
+        if (enrichedImportCount < 5) {
+          enrichedImportCount++;
+          await runAiAgentForReference({
+            userId: user.id,
+            refId: res.id,
+            url: normalized.url,
+            platformSlug: normalized.platform,
+            rawInput: url,
+            urlHandle: normalized.handle,
+            externalId: normalized.externalId,
+          }).catch(() => null);
+        }
       }
     } catch {
       // Continue importing remaining URLs
@@ -294,8 +356,89 @@ export async function importReferencesFromUrls(
   revalidatePath("/");
   revalidatePath("/inbox");
   revalidatePath("/references");
+  revalidatePath("/contents");
+  revalidatePath("/sources");
+  revalidatePath("/audio");
 
   return ok({ created, duplicates });
+}
+
+/**
+ * Manually triggers the AI Content Agent on a single Reference (forces enrichment even if auto-enrich is off).
+ */
+export async function enrichReferenceWithAgent(input: {
+  id: string;
+}): Promise<
+  ActionResult<{
+    enriched: boolean;
+    skippedReason?: string;
+    summary: string | null;
+    hookText: string | null;
+    draftContentId: string | null;
+    draftContentTitle: string | null;
+  }>
+> {
+  const user = await requireActionOwner();
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", "Invalid reference ID");
+  }
+
+  const res = await enrichReferenceById({
+    userId: user.id,
+    refId: parsed.data.id,
+    force: true,
+  });
+
+  if (!res.enriched && !res.metadataFetched && res.skippedReason === "not_found") {
+    return fail("not_found", "Reference not found");
+  }
+  if (!res.enriched && res.skippedReason === "ai_disabled") {
+    return fail("ai_disabled", "AI Automation is disabled in Settings");
+  }
+  if (!res.enriched && res.skippedReason === "daily_cap") {
+    return fail("ai_cap_reached", "Daily AI quota cap reached in Settings");
+  }
+
+  revalidatePath("/");
+  revalidatePath("/inbox");
+  revalidatePath("/references");
+  revalidatePath(`/references/${parsed.data.id}`);
+  revalidatePath("/contents");
+  revalidatePath("/sources");
+  revalidatePath("/audio");
+
+  return ok({
+    enriched: res.enriched,
+    skippedReason: res.skippedReason,
+    summary: res.summary,
+    hookText: res.hookText,
+    draftContentId: res.draftContentId,
+    draftContentTitle: res.draftContentTitle,
+  });
+}
+
+/**
+ * Enriches up to 5 Inbox references that are missing AI summaries/hooks.
+ */
+export async function enrichInboxBatch(): Promise<
+  ActionResult<{
+    processedCount: number;
+    enrichedCount: number;
+    draftedCount: number;
+  }>
+> {
+  const user = await requireActionOwner();
+  const summary = await enrichInboxBatchForUser(user.id, 5);
+
+  revalidatePath("/");
+  revalidatePath("/inbox");
+  revalidatePath("/references");
+  revalidatePath("/contents");
+  revalidatePath("/sources");
+  revalidatePath("/audio");
+
+  return ok(summary);
 }
 
 const setStatusSchema = z.object({

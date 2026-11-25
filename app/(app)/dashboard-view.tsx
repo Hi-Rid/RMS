@@ -63,6 +63,12 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
       if (res.ok) {
         if (res.data.status === "duplicate") {
           toast.info("Reference already saved in your database");
+        } else if (res.data.draftContentId) {
+          toast.success(
+            `Saved & AI drafted "${res.data.draftContentTitle || "New Content"}" in Studio!`
+          );
+        } else if (res.data.enriched) {
+          toast.success("Saved & AI-enriched! Summary, hook & pillars ready.");
         } else {
           toast.success("Link saved to Inbox! Ready to triage.");
         }

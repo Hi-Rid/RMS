@@ -19,9 +19,12 @@ import { rotateIngestToken } from "@/lib/actions/settings";
 
 interface IngestTokenCardProps {
   initialHasToken: boolean;
+  appUrl?: string;
 }
 
-export function IngestTokenCard({ initialHasToken }: IngestTokenCardProps) {
+export function IngestTokenCard({ initialHasToken, appUrl }: IngestTokenCardProps) {
+  const endpointBase = (appUrl || "https://<your-app-domain>").replace(/\/+$/, "");
+  const ingestEndpoint = `${endpointBase}/api/ingest`;
   const [hasToken, setHasToken] = React.useState(initialHasToken);
   const [freshToken, setFreshToken] = React.useState<string | null>(null);
   const [isRotating, setIsRotating] = React.useState(false);
@@ -178,7 +181,7 @@ export function IngestTokenCard({ initialHasToken }: IngestTokenCardProps) {
             <li>
               Add action <strong>Get Contents of URL</strong>:
               <ul className="list-disc list-inside pl-3 pt-1 text-[11px] font-mono text-foreground space-y-0.5">
-                <li>URL: <span className="text-muted-foreground">https://&lt;app&gt;/api/ingest</span></li>
+                <li>URL: <span className="text-muted-foreground">{ingestEndpoint}</span></li>
                 <li>Method: <span className="text-muted-foreground">POST</span></li>
                 <li>Header: <span className="text-muted-foreground">Authorization: Bearer &lt;TOKEN&gt;</span></li>
                 <li>Body (JSON): <span className="text-muted-foreground">key &quot;text&quot; = Shortcut Input</span></li>
@@ -203,13 +206,13 @@ export function IngestTokenCard({ initialHasToken }: IngestTokenCardProps) {
               Post JSON or raw text to save references automatically:
             </p>
             <pre className="p-2.5 rounded-lg bg-secondary/50 border border-border text-[11px] font-mono text-foreground overflow-x-auto leading-relaxed">
-{`curl -X POST "https://<app>/api/ingest" \\
+{`curl -X POST "${ingestEndpoint}" \\
   -H "Authorization: Bearer <TOKEN>" \\
   -H "Content-Type: application/json" \\
   -d '{"url":"https://instagram.com/reel/XYZ"}'`}
             </pre>
             <p className="text-[11px] font-mono text-muted-foreground">
-              Returns <code>201 created</code> or <code>200 duplicate</code>.
+              Returns <code>201 created</code> (plus AI <code>summary</code>, <code>hookText</code> &amp; optional <code>draftContentTitle</code>) or <code>200 duplicate</code>.
             </p>
           </div>
         </Card>

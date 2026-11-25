@@ -2,8 +2,10 @@ import { type NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { revalidatePath } from "next/cache";
 import { appSettings, systemLogs } from "@/db/schema";
 import { normalizeUrl, extractUrls } from "@/lib/domain/url";
+import { runAiAgentForReference } from "@/lib/ai/agent";
 import {
   getPlatformIdBySlug,
   getFormatIdBySlug,
@@ -77,6 +79,7 @@ export async function POST(request: NextRequest) {
   const contentType = request.headers.get("content-type") || "";
   let urls: string[] = [];
   let isSingleUrl = false;
+  let rawShareText: string | null = null;
 
   try {
     const rawBody = await request.text();
@@ -89,6 +92,9 @@ export async function POST(request: NextRequest) {
 
     if (contentType.includes("application/json")) {
       const json = JSON.parse(rawBody);
+      if (typeof json.text === "string" && json.text.trim()) {
+        rawShareText = json.text.trim();
+      }
       if (typeof json.url === "string" && json.url.trim()) {
         urls = [json.url.trim()];
         isSingleUrl = true;
@@ -99,6 +105,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // Plain text payload (e.g. raw share sheet input)
+      rawShareText = rawBody.trim() || null;
       urls = extractUrls(rawBody);
       if (urls.length === 0 && /^[a-zA-Z0-9-]+\.[a-zA-Z0-9.-]+\/[^\s]+$/.test(rawBody.trim())) {
         urls = [`https://${rawBody.trim()}`];
@@ -138,14 +145,36 @@ export async function POST(request: NextRequest) {
         formatId,
       });
 
+      const agentResult = !record.isDuplicate
+        ? await runAiAgentForReference({
+            userId,
+            refId: record.id,
+            url: normalized.url,
+            platformSlug: normalized.platform,
+            rawInput: rawShareText || targetUrl,
+            urlHandle: normalized.handle,
+            externalId: normalized.externalId,
+          }).catch(() => null)
+        : null;
+
       // Audit log
       await db.insert(systemLogs).values({
         userId,
         kind: "ingest",
         level: "info",
         message: `Ingest: ${record.isDuplicate ? "duplicate" : "created"} ${normalized.platform} reference`,
-        meta: { url: normalized.url, status: record.isDuplicate ? "duplicate" : "created" },
+        meta: {
+          url: normalized.url,
+          status: record.isDuplicate ? "duplicate" : "created",
+          enriched: agentResult?.enriched ?? false,
+          draftContentId: agentResult?.draftContentId ?? null,
+        },
       });
+
+      revalidatePath("/");
+      revalidatePath("/inbox");
+      revalidatePath("/references");
+      revalidatePath("/contents");
 
       const responseBody = {
         ok: true,
@@ -154,7 +183,16 @@ export async function POST(request: NextRequest) {
         platform: normalized.platform,
         url: normalized.url,
         archived: record.archived,
-        appUrl: `/references/${record.id}`,
+        enriched: agentResult?.enriched ?? false,
+        mode: agentResult?.mode ?? "inbox",
+        summary: agentResult?.summary ?? null,
+        hookText: agentResult?.hookText ?? null,
+        coverUrl: agentResult?.coverUrl ?? null,
+        draftContentId: agentResult?.draftContentId ?? null,
+        draftContentTitle: agentResult?.draftContentTitle ?? null,
+        appUrl: agentResult?.draftContentId
+          ? `/contents/${agentResult.draftContentId}`
+          : `/references/${record.id}`,
       };
 
       return NextResponse.json(responseBody, {
@@ -182,7 +220,10 @@ export async function POST(request: NextRequest) {
     status: "created" | "duplicate" | "invalid";
     id?: string;
     message?: string;
+    enriched?: boolean;
+    draftContentId?: string | null;
   }> = [];
+  let enrichedBatchCount = 0;
 
   for (const raw of cappedUrls) {
     try {
@@ -199,11 +240,33 @@ export async function POST(request: NextRequest) {
         formatId,
       });
 
+      let agentRes = null;
+      if (!record.isDuplicate && enrichedBatchCount < 5) {
+        enrichedBatchCount++;
+        agentRes = await runAiAgentForReference({
+          userId,
+          refId: record.id,
+          url: normalized.url,
+          platformSlug: normalized.platform,
+          rawInput: rawShareText || raw,
+          urlHandle: normalized.handle,
+          externalId: normalized.externalId,
+        }).catch(() => null);
+      }
+
       results.push({
         input: raw,
         status: record.isDuplicate ? "duplicate" : "created",
         id: record.id,
-        message: record.isDuplicate ? "Already saved" : "Created in inbox",
+        enriched: agentRes?.enriched ?? false,
+        draftContentId: agentRes?.draftContentId ?? null,
+        message: record.isDuplicate
+          ? "Already saved"
+          : agentRes?.draftContentTitle
+            ? `Drafted Content: ${agentRes.draftContentTitle}`
+            : agentRes?.enriched
+              ? "Created & AI enriched"
+              : "Created in inbox",
       });
     } catch (err: unknown) {
       const e = err as { message?: string };

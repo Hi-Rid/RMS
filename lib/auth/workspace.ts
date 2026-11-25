@@ -66,6 +66,8 @@ export async function ensureUserWorkspace(userId: string): Promise<void> {
             aiTextModel: "gemini-flash-lite-latest",
             aiDailyCap: 100,
             aiOutputLanguage: "id",
+            aiAutoEnrich: true,
+            aiIngestMode: "inbox",
           })
           .onConflictDoNothing();
 

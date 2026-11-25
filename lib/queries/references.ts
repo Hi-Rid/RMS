@@ -528,7 +528,7 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
       sourceAccount: r.sourceAccount?.id ? r.sourceAccount : null,
       audio: r.audio?.id ? r.audio : null,
       pillars: pillarMap.get(r.ref.id) || [],
-      coverUrl: coverMap.get(r.ref.id) || null,
+      coverUrl: coverMap.get(r.ref.id) || r.ref.coverUrl || null,
     }));
 
     return { items, total };
@@ -646,7 +646,7 @@ export async function getReferenceById(
       audio: row.audio?.id ? row.audio : null,
       pillars: refPillarsList,
       elements: refElementsList.map((e) => e.element),
-      coverUrl: refImageList[0]?.storagePath || null,
+      coverUrl: refImageList[0]?.storagePath || row.ref.coverUrl || null,
     };
   } catch (error) {
     console.warn(`Failed to get reference by ID ${id} (database fallback):`, error);

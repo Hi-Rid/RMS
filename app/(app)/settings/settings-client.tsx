@@ -140,6 +140,13 @@ export function SettingsClient({
   const [aiLanguage, setAiLanguage] = useState<"id" | "en">(
     (initialSettings.aiOutputLanguage as "id" | "en") || "id"
   );
+  const [aiAutoEnrich, setAiAutoEnrich] = useState(initialSettings.aiAutoEnrich);
+  const [aiIngestMode, setAiIngestMode] = useState<"inbox" | "selected" | "auto_draft">(
+    (initialSettings.aiIngestMode as "inbox" | "selected" | "auto_draft") || "inbox"
+  );
+  const [creatorNiche, setCreatorNiche] = useState(initialSettings.creatorNiche || "");
+  const [creatorAudience, setCreatorAudience] = useState(initialSettings.creatorAudience || "");
+  const [creatorVoice, setCreatorVoice] = useState(initialSettings.creatorVoice || "");
   const [testingConnection, setTestingConnection] = useState(false);
   const [savingAi, setSavingAi] = useState(false);
 
@@ -218,6 +225,11 @@ export function SettingsClient({
         aiTextModel: aiTextModel || undefined,
         aiDailyCap,
         aiOutputLanguage: aiLanguage,
+        aiAutoEnrich,
+        aiIngestMode,
+        creatorNiche: creatorNiche.trim() || null,
+        creatorAudience: creatorAudience.trim() || null,
+        creatorVoice: creatorVoice.trim() || null,
       });
       if (res.ok) {
         toast.success("AI configuration saved successfully.");
@@ -708,7 +720,7 @@ export function SettingsClient({
 
         {/* Tab 3: Ingest & Shortcuts */}
         <TabsContent value="ingest" className="space-y-6 focus-visible:outline-none">
-          <IngestTokenCard initialHasToken={initialSettings.hasToken} />
+          <IngestTokenCard initialHasToken={initialSettings.hasToken} appUrl={appUrl} />
 
           {/* Bookmarklet & Ingest Guide */}
           <Card className="rounded-xl border bg-card p-5 shadow-none space-y-3">
@@ -848,6 +860,103 @@ export function SettingsClient({
                     <option value="id">Indonesian (Bahasa Indonesia)</option>
                     <option value="en">English</option>
                   </select>
+                </div>
+
+                {/* Autonomous Content Agent */}
+                <div className="pt-4 border-t border-border/70 space-y-4">
+                  <div className="space-y-0.5">
+                    <h4 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground">
+                      Autonomous Content Agent
+                    </h4>
+                    <p className="text-[11px] text-muted-foreground">
+                      Turn shared TikTok, Instagram, and YouTube links into structured references or ready-to-shoot content drafts automatically.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 rounded-lg border border-border/80 bg-secondary/20 p-3">
+                    <div className="space-y-0.5">
+                      <div className="text-xs font-mono font-semibold text-foreground">
+                        Auto-Enrich on Ingest
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Fetch social metadata &amp; auto-fill summary, hook, pillars, tags, and visual notes when a link arrives.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={aiAutoEnrich}
+                      onCheckedChange={setAiAutoEnrich}
+                      aria-label="Toggle auto-enrich on ingest"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                      Post-Ingest Agent Mode
+                    </label>
+                    <select
+                      value={aiIngestMode}
+                      onChange={(e) =>
+                        setAiIngestMode(e.target.value as "inbox" | "selected" | "auto_draft")
+                      }
+                      className="w-full h-8 rounded-md border border-border bg-background px-2.5 text-xs font-mono text-foreground focus:outline-none"
+                    >
+                      <option value="inbox">Inbox Review — Enrich &amp; queue in Inbox for triage</option>
+                      <option value="selected">Auto-Select — Enrich &amp; promote straight to Selected</option>
+                      <option value="auto_draft">Full Auto Draft — Enrich &amp; auto-draft Content + Script in Studio</option>
+                    </select>
+                    <p className="text-[11px] text-muted-foreground">
+                      In <strong>Full Auto Draft</strong>, each shared link generates a tailored Content item with shooting script &amp; checklist in Studio.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3 pt-1">
+                    <div className="space-y-0.5">
+                      <h4 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground">
+                        Creator Persona Profile
+                      </h4>
+                      <p className="text-[11px] text-muted-foreground">
+                        Used by your AI Content Agent across auto-ingest, Bedah, Hooks, Script Drafting, and Captions.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                          Creator Niche / Topics
+                        </label>
+                        <Input
+                          value={creatorNiche}
+                          onChange={(e) => setCreatorNiche(e.target.value)}
+                          placeholder="e.g. Tech storytelling, solo builder, productivity"
+                          className="h-8 text-xs font-mono"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                          Target Audience
+                        </label>
+                        <Input
+                          value={creatorAudience}
+                          onChange={(e) => setCreatorAudience(e.target.value)}
+                          placeholder="e.g. Young Indonesian founders & creatives"
+                          className="h-8 text-xs font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                        Brand Voice &amp; Delivery Style
+                      </label>
+                      <Input
+                        value={creatorVoice}
+                        onChange={(e) => setCreatorVoice(e.target.value)}
+                        placeholder="e.g. Conversational, sharp storytelling, punchy 3-sec hooks, practical takeaways"
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2 pt-2">
