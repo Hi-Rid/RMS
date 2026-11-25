@@ -12,6 +12,10 @@ export interface SnapshotItem {
   comments: number | null;
   shares: number | null;
   saves: number | null;
+  reach: number | null;
+  followerDelta: number | null;
+  profileVisits: number | null;
+  avgWatchSeconds: string | null;
   retentionPct: string | null;
   rating: number | null;
   notes: string | null;
@@ -105,6 +109,10 @@ export async function listSnapshots(params: ListSnapshotsParams = {}): Promise<{
     comments: r.snapshot.comments,
     shares: r.snapshot.shares,
     saves: r.snapshot.saves,
+    reach: r.snapshot.reach,
+    followerDelta: r.snapshot.followerDelta,
+    profileVisits: r.snapshot.profileVisits,
+    avgWatchSeconds: r.snapshot.avgWatchSeconds,
     retentionPct: r.snapshot.retentionPct,
     rating: r.snapshot.rating,
     notes: r.snapshot.notes,

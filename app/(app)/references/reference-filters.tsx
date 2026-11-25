@@ -3,8 +3,7 @@
 import * as React from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Search, X, Check } from "lucide-react";
+import { Search, X, Check, Archive } from "lucide-react";
 import type { MasterData } from "@/lib/queries/references";
 
 interface ReferenceFiltersProps {
@@ -28,13 +27,19 @@ export function ReferenceFilters({ masterData }: ReferenceFiltersProps) {
 
   const currentStatus = searchParams.get("status") || "all";
   const currentPillar = searchParams.get("pillar") || "all";
+  const currentPlatform = searchParams.get("platform") || "all";
+  const currentFormat = searchParams.get("format") || "all";
   const currentUnused = searchParams.get("unused") === "1";
+  const currentArchived = searchParams.get("archived") === "1";
   const currentQuery = searchParams.get("q") || "";
 
   const [searchTerm, setSearchTerm] = React.useState(currentQuery);
 
   const updateFilters = (updates: Record<string, string | null>) => {
     const params = new URLSearchParams(searchParams.toString());
+    if (!("page" in updates)) {
+      params.delete("page");
+    }
     for (const [key, value] of Object.entries(updates)) {
       if (value === null || value === "" || value === "all") {
         params.delete(key);
@@ -42,7 +47,8 @@ export function ReferenceFilters({ masterData }: ReferenceFiltersProps) {
         params.set(key, value);
       }
     }
-    router.push(`${pathname}?${params.toString()}`);
+    const qs = params.toString();
+    router.push(qs ? `${pathname}?${qs}` : pathname);
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -52,8 +58,8 @@ export function ReferenceFilters({ masterData }: ReferenceFiltersProps) {
 
   return (
     <div className="space-y-4">
-      {/* Search Bar & Unused Toggle */}
-      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+      {/* Search Bar, Platform/Format Selects & Toggles */}
+      <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
         <form onSubmit={handleSearchSubmit} className="relative flex-1 max-w-md">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <Input
@@ -76,11 +82,39 @@ export function ReferenceFilters({ masterData }: ReferenceFiltersProps) {
           )}
         </form>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
+            value={currentPlatform}
+            onChange={(e) => updateFilters({ platform: e.target.value })}
+            aria-label="Filter by platform"
+            className="h-8 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
+          >
+            <option value="all">All Platforms</option>
+            {masterData.platforms.map((p) => (
+              <option key={p.id} value={p.slug}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={currentFormat}
+            onChange={(e) => updateFilters({ format: e.target.value })}
+            aria-label="Filter by format"
+            className="h-8 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
+          >
+            <option value="all">All Formats</option>
+            {masterData.formats.map((f) => (
+              <option key={f.id} value={f.slug}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+
           <button
             type="button"
             onClick={() => updateFilters({ unused: currentUnused ? null : "1" })}
-            className={`px-3 py-1 text-xs font-mono rounded border transition-all flex items-center gap-1.5 select-none ${
+            className={`px-3 py-1 h-8 text-xs font-mono rounded border transition-all flex items-center gap-1.5 select-none ${
               currentUnused
                 ? "bg-foreground text-background border-foreground font-bold"
                 : "bg-secondary text-muted-foreground border-border hover:text-foreground"
@@ -88,6 +122,19 @@ export function ReferenceFilters({ masterData }: ReferenceFiltersProps) {
           >
             {currentUnused && <Check className="size-3" />}
             <span>Unused only</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => updateFilters({ archived: currentArchived ? null : "1" })}
+            className={`px-3 py-1 h-8 text-xs font-mono rounded border transition-all flex items-center gap-1.5 select-none ${
+              currentArchived
+                ? "bg-foreground text-background border-foreground font-bold"
+                : "bg-secondary text-muted-foreground border-border hover:text-foreground"
+            }`}
+          >
+            <Archive className="size-3" />
+            <span>Archived</span>
           </button>
         </div>
       </div>

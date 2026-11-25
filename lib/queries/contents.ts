@@ -1,4 +1,4 @@
-import { eq, and, sql, or, isNull, desc, inArray } from "drizzle-orm";
+import { eq, and, sql, or, isNull, desc, asc, ne, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   contents,
@@ -13,6 +13,7 @@ import {
   snapshots,
   hookTypes,
   audios,
+  snippets,
 } from "@/db/schema";
 
 export interface ContentListItem {
@@ -26,6 +27,8 @@ export interface ContentListItem {
   tags: string[];
   plannedFor: string | null;
   finalRating: number | null;
+  finalRatingNote: string | null;
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
   format: { id: string; name: string; slug: string } | null;
@@ -116,6 +119,7 @@ export async function listContents(params: ListContentsParams = {}): Promise<{
   const [totalRes] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(contents)
+    .leftJoin(formats, eq(contents.formatId, formats.id))
     .where(whereClause);
 
   const total = totalRes?.count || 0;
@@ -237,6 +241,8 @@ export async function listContents(params: ListContentsParams = {}): Promise<{
     tags: r.content.tags || [],
     plannedFor: r.content.plannedFor,
     finalRating: r.content.finalRating,
+    finalRatingNote: r.content.finalRatingNote,
+    archivedAt: r.content.archivedAt,
     createdAt: r.content.createdAt,
     updatedAt: r.content.updatedAt,
     format: r.format?.id ? r.format : null,
@@ -424,6 +430,8 @@ export async function getContentById(id: string): Promise<ContentDetailItem | nu
     tags: row.content.tags || [],
     plannedFor: row.content.plannedFor,
     finalRating: row.content.finalRating,
+    finalRatingNote: row.content.finalRatingNote,
+    archivedAt: row.content.archivedAt,
     createdAt: row.content.createdAt,
     updatedAt: row.content.updatedAt,
     format: row.format?.id ? row.format : null,
@@ -438,4 +446,91 @@ export async function getContentById(id: string): Promise<ContentDetailItem | nu
     checklist: checklistRows,
     posts: postsWithSnapshots,
   };
+}
+
+export interface StudioMasterOptions {
+  series: { id: string; name: string; slug: string }[];
+  audios: { id: string; title: string; artist: string; isOriginal: boolean }[];
+  snippets: { id: string; kind: string; title: string; body: string }[];
+  availableRefs: {
+    id: string;
+    url: string;
+    hookText: string | null;
+    platformName: string;
+  }[];
+}
+
+/**
+ * Returns additional studio selections (Series, Audios, Snippets, and unlinked active References).
+ */
+export async function getStudioMasterOptions(): Promise<StudioMasterOptions> {
+  try {
+    const [seriesRows, audioRows, snippetRows, availableRefRows] = await Promise.all([
+      db
+        .select({
+          id: series.id,
+          name: series.name,
+          slug: series.slug,
+        })
+        .from(series)
+        .where(eq(series.isActive, true))
+        .orderBy(asc(series.sortOrder), asc(series.name)),
+
+      db
+        .select({
+          id: audios.id,
+          title: audios.title,
+          artist: audios.artist,
+          isOriginal: audios.isOriginal,
+        })
+        .from(audios)
+        .orderBy(asc(audios.title))
+        .limit(100),
+
+      db
+        .select({
+          id: snippets.id,
+          kind: snippets.kind,
+          title: snippets.title,
+          body: snippets.body,
+        })
+        .from(snippets)
+        .orderBy(asc(snippets.title))
+        .limit(100),
+
+      db
+        .select({
+          id: refs.id,
+          url: refs.url,
+          hookText: refs.hookText,
+          platformName: platforms.name,
+        })
+        .from(refs)
+        .innerJoin(platforms, eq(refs.platformId, platforms.id))
+        .where(
+          and(
+            isNull(refs.contentId),
+            isNull(refs.archivedAt),
+            ne(refs.status, "skipped")
+          )
+        )
+        .orderBy(desc(refs.createdAt))
+        .limit(60),
+    ]);
+
+    return {
+      series: seriesRows,
+      audios: audioRows,
+      snippets: snippetRows,
+      availableRefs: availableRefRows,
+    };
+  } catch (error) {
+    console.warn("Failed to load studio master options:", error);
+    return {
+      series: [],
+      audios: [],
+      snippets: [],
+      availableRefs: [],
+    };
+  }
 }

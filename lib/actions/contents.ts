@@ -19,11 +19,13 @@ const createContentSchema = z.object({
   title: z.string().min(1, "Title is required").max(200),
   formatId: z.string().uuid().nullable().optional(),
   seriesId: z.string().uuid().nullable().optional(),
+  audioId: z.string().uuid().nullable().optional(),
   pillarIds: z.array(z.string().uuid()).optional(),
   refIds: z.array(z.string().uuid()).optional(),
   hookText: z.string().optional(),
   hookTypeId: z.string().uuid().nullable().optional(),
   notes: z.string().optional(),
+  changesNote: z.string().optional(),
   workUrl: z.string().url().nullable().optional(),
   plannedFor: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
@@ -43,11 +45,13 @@ export async function createContent(
     title,
     formatId,
     seriesId,
+    audioId,
     pillarIds,
     refIds,
     hookText,
     hookTypeId,
     notes,
+    changesNote,
     workUrl,
     plannedFor,
     tags,
@@ -61,14 +65,19 @@ export async function createContent(
         title: title.trim(),
         formatId: formatId || null,
         seriesId: seriesId || null,
+        audioId: audioId || null,
         hookText: hookText || null,
         hookTypeId: hookTypeId || null,
         notes: notes || null,
+        changesNote: changesNote || null,
         workUrl: workUrl || null,
         plannedFor: plannedFor || null,
         tags: tags || [],
         status: "production",
-        searchText: `${title} ${hookText || ""} ${notes || ""}`.toLowerCase(),
+        searchText: [title, hookText || "", notes || "", changesNote || "", ...(tags || [])]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase(),
       })
       .returning({ id: contents.id });
 
@@ -145,6 +154,7 @@ const updateContentSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   formatId: z.string().uuid().nullable().optional(),
   seriesId: z.string().uuid().nullable().optional(),
+  audioId: z.string().uuid().nullable().optional(),
   pillarIds: z.array(z.string().uuid()).optional(),
   hookText: z.string().optional(),
   hookTypeId: z.string().uuid().nullable().optional(),
@@ -189,6 +199,7 @@ export async function updateContent(
     if (updates.title !== undefined) valuesToUpdate.title = updates.title.trim();
     if (updates.formatId !== undefined) valuesToUpdate.formatId = updates.formatId;
     if (updates.seriesId !== undefined) valuesToUpdate.seriesId = updates.seriesId;
+    if (updates.audioId !== undefined) valuesToUpdate.audioId = updates.audioId;
     if (updates.hookText !== undefined) valuesToUpdate.hookText = updates.hookText;
     if (updates.hookTypeId !== undefined) valuesToUpdate.hookTypeId = updates.hookTypeId;
     if (updates.notes !== undefined) valuesToUpdate.notes = updates.notes;
@@ -322,6 +333,19 @@ export async function linkReferenceToContent(
   if (!parsed.success) return fail("validation", "Invalid parameters");
 
   return await withTx(async (tx) => {
+    const [refRow] = await tx
+      .select({ id: refs.id, contentId: refs.contentId })
+      .from(refs)
+      .where(eq(refs.id, parsed.data.refId))
+      .limit(1);
+
+    if (!refRow) {
+      return fail("not_found", "Reference not found");
+    }
+    if (refRow.contentId && refRow.contentId !== parsed.data.contentId) {
+      return fail("conflict", "Reference is already linked to another content piece");
+    }
+
     const [existingCount] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(refs)
@@ -334,6 +358,7 @@ export async function linkReferenceToContent(
       .set({
         contentId: parsed.data.contentId,
         contentPosition: nextPosition,
+        status: "production",
         statusChangedAt: sql`now()`,
       })
       .where(eq(refs.id, parsed.data.refId));
@@ -395,7 +420,60 @@ export async function archiveContent(
     .where(eq(contents.id, parsed.data.id));
 
   revalidatePath("/contents");
+  revalidatePath(`/contents/${parsed.data.id}`);
   revalidatePath("/");
 
   return ok({ id: parsed.data.id });
+}
+
+export async function restoreContent(
+  input: z.infer<typeof archiveContentSchema>
+): Promise<ActionResult<{ id: string }>> {
+  await requireActionOwner();
+
+  const parsed = archiveContentSchema.safeParse(input);
+  if (!parsed.success) return fail("validation", "Invalid content ID");
+
+  await db
+    .update(contents)
+    .set({ archivedAt: null, updatedAt: sql`now()` })
+    .where(eq(contents.id, parsed.data.id));
+
+  revalidatePath("/contents");
+  revalidatePath(`/contents/${parsed.data.id}`);
+  revalidatePath("/");
+
+  return ok({ id: parsed.data.id });
+}
+
+export async function deleteContentPermanently(
+  input: z.infer<typeof archiveContentSchema>
+): Promise<ActionResult<{ id: string }>> {
+  await requireActionOwner();
+
+  const parsed = archiveContentSchema.safeParse(input);
+  if (!parsed.success) return fail("validation", "Invalid content ID");
+
+  return await withTx(async (tx) => {
+    // Release linked references cleanly so refs_status_content_chk & ON DELETE RESTRICT are satisfied
+    await tx
+      .update(refs)
+      .set({
+        contentId: null,
+        contentPosition: null,
+        status: "selected",
+        statusChangedAt: sql`now()`,
+      })
+      .where(eq(refs.contentId, parsed.data.id));
+
+    await tx.delete(contents).where(eq(contents.id, parsed.data.id));
+
+    revalidatePath("/contents");
+    revalidatePath("/references");
+    revalidatePath("/inbox");
+    revalidatePath("/evaluate");
+    revalidatePath("/");
+
+    return ok({ id: parsed.data.id });
+  });
 }

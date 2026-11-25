@@ -16,6 +16,10 @@ const saveSnapshotSchema = z.object({
   comments: z.number().int().min(0).nullable().optional(),
   shares: z.number().int().min(0).nullable().optional(),
   saves: z.number().int().min(0).nullable().optional(),
+  reach: z.number().int().min(0).nullable().optional(),
+  followerDelta: z.number().int().nullable().optional(),
+  profileVisits: z.number().int().min(0).nullable().optional(),
+  avgWatchSeconds: z.string().nullable().optional(),
   retentionPct: z.string().nullable().optional(),
   rating: z.number().int().min(1).max(5).nullable().optional(),
   notes: z.string().optional(),
@@ -31,7 +35,21 @@ export async function saveSnapshotMetrics(
     return fail("validation", parsed.error.issues[0]?.message || "Invalid snapshot data");
   }
 
-  const { id, views, likes, comments, shares, saves, retentionPct, rating, notes } = parsed.data;
+  const {
+    id,
+    views,
+    likes,
+    comments,
+    shares,
+    saves,
+    reach,
+    followerDelta,
+    profileVisits,
+    avgWatchSeconds,
+    retentionPct,
+    rating,
+    notes,
+  } = parsed.data;
 
   return await withTx(async (tx) => {
     // 1. Fetch snapshot and find contentId
@@ -58,7 +76,11 @@ export async function saveSnapshotMetrics(
         comments: comments ?? null,
         shares: shares ?? null,
         saves: saves ?? null,
-        retentionPct: retentionPct ? retentionPct : null,
+        reach: reach ?? null,
+        followerDelta: followerDelta ?? null,
+        profileVisits: profileVisits ?? null,
+        avgWatchSeconds: avgWatchSeconds?.trim() ? avgWatchSeconds.trim() : null,
+        retentionPct: retentionPct?.trim() ? retentionPct.trim() : null,
         rating: rating ?? null,
         notes: notes || null,
         filledAt: sql`now()`,

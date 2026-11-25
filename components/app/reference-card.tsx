@@ -18,11 +18,13 @@ import {
   User,
   Plus,
   AlertCircle,
+  RotateCcw,
 } from "lucide-react";
 import {
   setReferenceStatus,
   skipReference,
   unskipReference,
+  restoreReference,
 } from "@/lib/actions/references";
 import { toast } from "sonner";
 import type { ReferenceListItem, MasterData } from "@/lib/queries/references";
@@ -48,6 +50,7 @@ export function ReferenceCard({
       const res = await setReferenceStatus({ id: reference.id, status: "selected" });
       if (res.ok) {
         toast.success("Reference selected");
+        router.refresh();
       } else {
         toast.error(res.error.message);
       }
@@ -60,6 +63,7 @@ export function ReferenceCard({
       const res = await skipReference({ id: reference.id });
       if (res.ok) {
         toast.success("Reference skipped");
+        router.refresh();
       } else {
         toast.error(res.error.message);
       }
@@ -72,12 +76,27 @@ export function ReferenceCard({
       const res = await unskipReference({ id: reference.id, to: "inbox" });
       if (res.ok) {
         toast.success("Reference moved to inbox");
+        router.refresh();
       } else {
         toast.error(res.error.message);
       }
     });
   };
 
+  const handleRestore = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    startTransition(async () => {
+      const res = await restoreReference({ id: reference.id });
+      if (res.ok) {
+        toast.success("Reference restored");
+        router.refresh();
+      } else {
+        toast.error(res.error.message);
+      }
+    });
+  };
+
+  const isArchived = Boolean(reference.archivedAt);
   const isInbox = reference.status === "inbox";
   const isSelected = reference.status === "selected";
   const isSkipped = reference.status === "skipped";
@@ -239,52 +258,67 @@ export function ReferenceCard({
 
           {showTriageActions && (
             <div className="flex items-center gap-1">
-              {isInbox && (
-                <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={isPending}
-                    onClick={handleSkip}
-                    className="h-7 px-2 text-[11px] font-mono text-muted-foreground hover:text-foreground"
-                  >
-                    <XCircle className="size-3 mr-1" />
-                    <span>Skip</span>
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={isPending}
-                    onClick={handleSelect}
-                    className="h-7 px-2.5 text-[11px] font-mono bg-foreground text-background hover:bg-foreground/90 font-bold"
-                  >
-                    <CheckCircle2 className="size-3 mr-1" />
-                    <span>Select</span>
-                  </Button>
-                </>
-              )}
-
-              {isSelected && (
-                <Link href={`/contents/new?refId=${reference.id}`}>
-                  <Button
-                    size="sm"
-                    className="h-7 px-2.5 text-[11px] font-mono bg-foreground text-background hover:bg-foreground/90 font-bold"
-                  >
-                    <Plus className="size-3 mr-1" />
-                    <span>Create Content</span>
-                  </Button>
-                </Link>
-              )}
-
-              {isSkipped && (
+              {isArchived ? (
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={isPending}
-                  onClick={handleUnskip}
-                  className="h-7 px-2 text-[11px] font-mono"
+                  onClick={handleRestore}
+                  className="h-7 px-2.5 text-[11px] font-mono gap-1"
                 >
-                  <span>Unskip</span>
+                  <RotateCcw className="size-3" />
+                  <span>Restore</span>
                 </Button>
+              ) : (
+                <>
+                  {isInbox && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isPending}
+                        onClick={handleSkip}
+                        className="h-7 px-2 text-[11px] font-mono text-muted-foreground hover:text-foreground"
+                      >
+                        <XCircle className="size-3 mr-1" />
+                        <span>Skip</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={isPending}
+                        onClick={handleSelect}
+                        className="h-7 px-2.5 text-[11px] font-mono bg-foreground text-background hover:bg-foreground/90 font-bold"
+                      >
+                        <CheckCircle2 className="size-3 mr-1" />
+                        <span>Select</span>
+                      </Button>
+                    </>
+                  )}
+
+                  {isSelected && (
+                    <Link href={`/contents/new?refId=${reference.id}`}>
+                      <Button
+                        size="sm"
+                        className="h-7 px-2.5 text-[11px] font-mono bg-foreground text-background hover:bg-foreground/90 font-bold"
+                      >
+                        <Plus className="size-3 mr-1" />
+                        <span>Create Content</span>
+                      </Button>
+                    </Link>
+                  )}
+
+                  {isSkipped && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={handleUnskip}
+                      className="h-7 px-2 text-[11px] font-mono"
+                    >
+                      <span>Unskip</span>
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           )}

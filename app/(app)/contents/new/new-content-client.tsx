@@ -8,35 +8,51 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Loader2, Sparkles, Plus, ExternalLink, Link as LinkIcon } from "lucide-react";
+import { ArrowLeft, Loader2, Plus, ExternalLink, Link as LinkIcon } from "lucide-react";
 import { createContent } from "@/lib/actions/contents";
 import { toast } from "sonner";
 import type { MasterData, ReferenceListItem } from "@/lib/queries/references";
+import type { StudioMasterOptions } from "@/lib/queries/contents";
 
 interface NewContentClientProps {
   masterData: MasterData;
+  studioOptions: StudioMasterOptions;
   sourceReference: ReferenceListItem | null;
+  initialIdea?: string;
 }
 
 export function NewContentClient({
   masterData,
+  studioOptions,
   sourceReference,
+  initialIdea = "",
 }: NewContentClientProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
+  const trimmedIdea = initialIdea.trim();
   const [title, setTitle] = useState(
-    sourceReference?.hookText
+    trimmedIdea
+      ? trimmedIdea.slice(0, 180)
+      : sourceReference?.hookText
       ? `Adapt: ${sourceReference.hookText.slice(0, 50)}...`
       : ""
   );
   const [formatId, setFormatId] = useState(sourceReference?.format?.id || "");
+  const [seriesId, setSeriesId] = useState("");
+  const [audioId, setAudioId] = useState(sourceReference?.audio?.id || "");
   const [selectedPillars, setSelectedPillars] = useState<string[]>(
     sourceReference?.pillars.map((p) => p.id) || []
   );
   const [hookText, setHookText] = useState(sourceReference?.hookText || "");
   const [hookTypeId, setHookTypeId] = useState(sourceReference?.hookType?.id || "");
-  const [notes, setNotes] = useState(sourceReference?.notes || "");
+  const [notes, setNotes] = useState(
+    trimmedIdea && sourceReference?.notes
+      ? `Adaptation Focus: ${trimmedIdea}\n\n${sourceReference.notes}`
+      : sourceReference?.notes || ""
+  );
+  const [changesNote, setChangesNote] = useState(trimmedIdea ? trimmedIdea : "");
+  const [tagsInput, setTagsInput] = useState((sourceReference?.tags || []).join(", "));
   const [plannedFor, setPlannedFor] = useState("");
   const [workUrl, setWorkUrl] = useState("");
 
@@ -53,15 +69,28 @@ export function NewContentClient({
       return;
     }
 
+    const parsedTags = Array.from(
+      new Set(
+        tagsInput
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      )
+    ).slice(0, 30);
+
     startTransition(async () => {
       const res = await createContent({
         title,
         formatId: formatId || null,
+        seriesId: seriesId || null,
+        audioId: audioId || null,
         pillarIds: selectedPillars,
         refIds: sourceReference ? [sourceReference.id] : [],
         hookText: hookText || undefined,
         hookTypeId: hookTypeId || null,
         notes: notes || undefined,
+        changesNote: changesNote || undefined,
+        tags: parsedTags,
         workUrl: workUrl || null,
         plannedFor: plannedFor || null,
       });
@@ -76,7 +105,7 @@ export function NewContentClient({
   };
 
   return (
-    <div className="w-full max-w-3xl py-8 px-4 sm:px-8 space-y-6">
+    <div className="w-full max-w-4xl mx-auto py-8 px-4 sm:px-8 space-y-6">
       {/* Top Header */}
       <div className="flex items-center justify-between border-b border-border/80 pb-4">
         <Link
@@ -165,7 +194,7 @@ export function NewContentClient({
           </div>
         </div>
 
-        {/* Format & Hook Type */}
+        {/* Format, Series, Hook Type, Audio */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
@@ -180,6 +209,24 @@ export function NewContentClient({
               {masterData.formats.map((fmt) => (
                 <option key={fmt.id} value={fmt.id}>
                   {fmt.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              Series
+            </Label>
+            <select
+              value={seriesId}
+              onChange={(e) => setSeriesId(e.target.value)}
+              className="w-full h-9 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
+            >
+              <option value="">-- Standalone content --</option>
+              {studioOptions.series.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
                 </option>
               ))}
             </select>
@@ -202,6 +249,26 @@ export function NewContentClient({
               ))}
             </select>
           </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              Audio Track
+            </Label>
+            <select
+              value={audioId}
+              onChange={(e) => setAudioId(e.target.value)}
+              className="w-full h-9 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
+            >
+              <option value="">-- Choose audio (optional) --</option>
+              {studioOptions.audios.map((audio) => (
+                <option key={audio.id} value={audio.id}>
+                  {audio.title}
+                  {audio.artist ? ` — ${audio.artist}` : ""}
+                  {audio.isOriginal ? " (Original)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Hook statement */}
@@ -217,6 +284,20 @@ export function NewContentClient({
           />
         </div>
 
+        {/* What I Changed / Differentiation */}
+        <div className="space-y-1.5">
+          <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            What I Changed / Differentiation
+          </Label>
+          <Textarea
+            value={changesNote}
+            onChange={(e) => setChangesNote(e.target.value)}
+            placeholder="Your original angle, framing, pacing, or product twist vs. the reference..."
+            rows={3}
+            className="text-xs font-mono"
+          />
+        </div>
+
         {/* Script / Outline / Notes */}
         <div className="space-y-1.5">
           <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
@@ -228,6 +309,19 @@ export function NewContentClient({
             placeholder="Key points, dialogue, visual cues, shot checklist..."
             rows={5}
             className="text-xs font-mono"
+          />
+        </div>
+
+        {/* Tags */}
+        <div className="space-y-1.5">
+          <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            Tags (comma-separated)
+          </Label>
+          <Input
+            value={tagsInput}
+            onChange={(e) => setTagsInput(e.target.value)}
+            placeholder="lighting, storytelling, transition"
+            className="text-xs font-mono h-9"
           />
         </div>
 

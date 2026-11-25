@@ -40,6 +40,17 @@ export function AppSidebar({
   onOpenAddLinks,
 }: AppSidebarProps) {
   const pathname = usePathname();
+  const [showAllPillars, setShowAllPillars] = React.useState(false);
+
+  const orderedPillars = React.useMemo(
+    () =>
+      [...counts.pillars].sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return 0;
+      }),
+    [counts.pillars]
+  );
+  const visiblePillars = showAllPillars ? orderedPillars : orderedPillars.slice(0, 6);
 
   const isNavActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -190,13 +201,24 @@ export function AppSidebar({
             />
           </div>
 
-          {/* Pillars Group (if any active) */}
-          {counts.pillars.length > 0 && (
+          {/* Pillars Group (collapsible, prioritizing pillars with references) */}
+          {orderedPillars.length > 0 && (
             <div className="space-y-1 pt-2 border-t border-border/60">
-              <div className="px-2 pb-1 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                Pillars
+              <div className="flex items-center justify-between px-2 pb-1">
+                <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                  Pillars
+                </span>
+                {orderedPillars.length > 6 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllPillars((prev) => !prev)}
+                    className="text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showAllPillars ? "Less" : `All (${orderedPillars.length})`}
+                  </button>
+                )}
               </div>
-              {counts.pillars.map((pillar) => (
+              {visiblePillars.map((pillar) => (
                 <Link
                   key={pillar.id}
                   href={`/references?pillar=${pillar.slug}`}
@@ -206,6 +228,17 @@ export function AppSidebar({
                   <span className="text-[11px] font-mono text-muted-foreground">{pillar.count}</span>
                 </Link>
               ))}
+              {orderedPillars.length > 6 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllPillars((prev) => !prev)}
+                  className="w-full text-left px-2.5 py-1 text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {showAllPillars
+                    ? "Show less"
+                    : `+ Show ${orderedPillars.length - 6} more pillars`}
+                </button>
+              )}
             </div>
           )}
 

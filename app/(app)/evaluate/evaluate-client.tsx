@@ -140,20 +140,63 @@ function SnapshotRowCard({
   const [likes, setLikes] = useState<string>(
     snapshot.likes !== null ? String(snapshot.likes) : ""
   );
+  const [comments, setComments] = useState<string>(
+    snapshot.comments !== null ? String(snapshot.comments) : ""
+  );
+  const [saves, setSaves] = useState<string>(
+    snapshot.saves !== null ? String(snapshot.saves) : ""
+  );
+  const [shares, setShares] = useState<string>(
+    snapshot.shares !== null ? String(snapshot.shares) : ""
+  );
   const [retentionPct, setRetentionPct] = useState<string>(
     snapshot.retentionPct !== null ? String(snapshot.retentionPct) : ""
   );
+  const [reach, setReach] = useState<string>(
+    snapshot.reach !== null ? String(snapshot.reach) : ""
+  );
+  const [avgWatchSeconds, setAvgWatchSeconds] = useState<string>(
+    snapshot.avgWatchSeconds !== null ? String(snapshot.avgWatchSeconds) : ""
+  );
+  const [followerDelta, setFollowerDelta] = useState<string>(
+    snapshot.followerDelta !== null ? String(snapshot.followerDelta) : ""
+  );
+  const [profileVisits, setProfileVisits] = useState<string>(
+    snapshot.profileVisits !== null ? String(snapshot.profileVisits) : ""
+  );
+  const [showMoreMetrics, setShowMoreMetrics] = useState<boolean>(
+    Boolean(
+      snapshot.reach !== null ||
+        snapshot.avgWatchSeconds !== null ||
+        snapshot.followerDelta !== null ||
+        snapshot.profileVisits !== null
+    )
+  );
   const [rating, setRating] = useState<number | null>(snapshot.rating);
   const [notes, setNotes] = useState<string>(snapshot.notes || "");
+
+  const parseIntOrNull = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const parsed = Number.parseInt(trimmed, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     startTransition(async () => {
       const res = await saveSnapshotMetrics({
         id: snapshot.id,
-        views: views ? parseInt(views, 10) : null,
-        likes: likes ? parseInt(likes, 10) : null,
-        retentionPct: retentionPct ? retentionPct : null,
+        views: parseIntOrNull(views),
+        likes: parseIntOrNull(likes),
+        comments: parseIntOrNull(comments),
+        saves: parseIntOrNull(saves),
+        shares: parseIntOrNull(shares),
+        reach: parseIntOrNull(reach),
+        followerDelta: parseIntOrNull(followerDelta),
+        profileVisits: parseIntOrNull(profileVisits),
+        avgWatchSeconds: avgWatchSeconds.trim() ? avgWatchSeconds.trim() : null,
+        retentionPct: retentionPct.trim() ? retentionPct.trim() : null,
         rating: rating,
         notes: notes || undefined,
       });
@@ -221,14 +264,15 @@ function SnapshotRowCard({
       </div>
 
       {/* Metrics Form */}
-      <form onSubmit={handleSave} className="space-y-4">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+      <form onSubmit={handleSave} className="space-y-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-xs font-mono">
           <div className="space-y-1">
             <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
               Total Views
             </Label>
             <Input
               type="number"
+              min={0}
               value={views}
               onChange={(e) => setViews(e.target.value)}
               placeholder="0"
@@ -242,8 +286,51 @@ function SnapshotRowCard({
             </Label>
             <Input
               type="number"
+              min={0}
               value={likes}
               onChange={(e) => setLikes(e.target.value)}
+              placeholder="0"
+              className="h-8 text-xs font-mono"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Comments
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              value={comments}
+              onChange={(e) => setComments(e.target.value)}
+              placeholder="0"
+              className="h-8 text-xs font-mono"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Saves
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              value={saves}
+              onChange={(e) => setSaves(e.target.value)}
+              placeholder="0"
+              className="h-8 text-xs font-mono"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Shares
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              value={shares}
+              onChange={(e) => setShares(e.target.value)}
               placeholder="0"
               className="h-8 text-xs font-mono"
             />
@@ -272,7 +359,7 @@ function SnapshotRowCard({
                   key={star}
                   type="button"
                   onClick={() => setRating(star)}
-                  className={`p-1 transition-colors ${
+                  className={`p-0.5 transition-colors ${
                     rating && star <= rating
                       ? "text-amber-500"
                       : "text-muted-foreground/40 hover:text-foreground"
@@ -283,6 +370,77 @@ function SnapshotRowCard({
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Toggle for Secondary Metrics */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowMoreMetrics((prev) => !prev)}
+            className="text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showMoreMetrics
+              ? "− Hide extra metrics (Reach, Watch Time, Follower Δ, Visits)"
+              : "+ More metrics (Reach, Watch Time, Follower Δ, Visits)"}
+          </button>
+
+          {showMoreMetrics && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono pt-2">
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Reach
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={reach}
+                  onChange={(e) => setReach(e.target.value)}
+                  placeholder="0"
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Avg Watch (s)
+                </Label>
+                <Input
+                  type="text"
+                  value={avgWatchSeconds}
+                  onChange={(e) => setAvgWatchSeconds(e.target.value)}
+                  placeholder="14.2"
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Follower Delta (+/-)
+                </Label>
+                <Input
+                  type="number"
+                  value={followerDelta}
+                  onChange={(e) => setFollowerDelta(e.target.value)}
+                  placeholder="0"
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Profile Visits
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={profileVisits}
+                  onChange={(e) => setProfileVisits(e.target.value)}
+                  placeholder="0"
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer actions */}

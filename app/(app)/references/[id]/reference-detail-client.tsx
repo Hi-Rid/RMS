@@ -59,6 +59,18 @@ export function ReferenceDetailClient({
   const [tab, setTab] = useState<"capture" | "bedah">("capture");
   const [isAiLoading, setIsAiLoading] = useState(false);
 
+  const [aiIdeas, setAiIdeas] = useState<string[]>(() => {
+    if (!reference.notes) return [];
+    const marker = "Adaptation Ideas:";
+    const idx = reference.notes.indexOf(marker);
+    if (idx === -1) return [];
+    return reference.notes
+      .slice(idx + marker.length)
+      .split("\n")
+      .map((line) => line.replace(/^\s*[-*•]\s*/, "").trim())
+      .filter(Boolean);
+  });
+
   const handleAiBedah = async () => {
     setIsAiLoading(true);
     try {
@@ -74,6 +86,7 @@ export function ReferenceDetailClient({
 
       setHookText(res.data.hookText);
       setVisualNotes(res.data.visualNotes);
+      setAiIdeas(res.data.adaptIdeas || []);
       setNotes(
         (prev) =>
           `${prev ? prev + "\n\n" : ""}Key Takeaway: ${res.data.keyTakeaway}\n\nAdaptation Ideas:\n- ${res.data.adaptIdeas.join("\n- ")}`
@@ -658,6 +671,41 @@ export function ReferenceDetailClient({
                 className="text-xs font-mono"
               />
             </div>
+
+            {/* Interactive Adaptation Ideas -> 1-Click Turn into Content */}
+            {aiIdeas.length > 0 && (
+              <div className="space-y-2 pt-2">
+                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <Sparkles className="size-3.5 text-amber-500" />
+                  <span>Adaptation Ideas (Turn into Original Content)</span>
+                </Label>
+                <div className="space-y-2">
+                  {aiIdeas.map((idea, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3 rounded-lg border border-border bg-secondary/30 flex items-center justify-between gap-3"
+                    >
+                      <p className="text-xs font-mono text-foreground leading-relaxed flex-1">
+                        {idea}
+                      </p>
+                      <Link
+                        href={`/contents/new?refId=${reference.id}&idea=${encodeURIComponent(idea)}`}
+                        className="shrink-0"
+                      >
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-7 px-2.5 text-[11px] font-mono bg-foreground text-background font-bold gap-1"
+                        >
+                          <Plus className="size-3" />
+                          <span>Turn into Content</span>
+                        </Button>
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="pt-4 border-t border-border flex items-center justify-end">

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/app/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,17 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   ArrowLeft,
   CheckSquare,
   Square,
@@ -27,41 +39,63 @@ import {
   Save,
   Loader2,
   Clock,
-  CheckCircle2,
   Star,
   Link as LinkIcon,
   Unlink,
   FileText,
   Sparkles,
+  Archive,
+  RotateCcw,
 } from "lucide-react";
 import {
   updateContent,
   toggleChecklistItem,
   addChecklistItem,
   deleteChecklistItem,
+  linkReferenceToContent,
   unlinkReferenceFromContent,
+  archiveContent,
+  restoreContent,
+  deleteContentPermanently,
 } from "@/lib/actions/contents";
 import { addPost, deletePost } from "@/lib/actions/posts";
-import { aiGenerateHooks, aiDraftScript, type GeneratedHook } from "@/lib/actions/ai";
+import {
+  aiGenerateHooks,
+  aiDraftScript,
+  aiGenerateCaption,
+  type GeneratedHook,
+} from "@/lib/actions/ai";
 import { toast } from "sonner";
-import type { ContentDetailItem } from "@/lib/queries/contents";
+import type { ContentDetailItem, StudioMasterOptions } from "@/lib/queries/contents";
 import type { MasterData } from "@/lib/queries/references";
 
 interface ContentStudioClientProps {
   content: ContentDetailItem;
   masterData: MasterData;
+  studioOptions: StudioMasterOptions;
 }
 
 export function ContentStudioClient({
   content,
   masterData,
+  studioOptions,
 }: ContentStudioClientProps) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  // Content editing state
+  // Content metadata & script state
   const [title, setTitle] = useState(content.title);
+  const [formatId, setFormatId] = useState(content.format?.id || "");
+  const [seriesId, setSeriesId] = useState(content.series?.id || "");
+  const [hookTypeId, setHookTypeId] = useState(content.hookType?.id || "");
+  const [audioId, setAudioId] = useState(content.audio?.id || "");
+  const [selectedPillars, setSelectedPillars] = useState<string[]>(
+    content.pillars.map((p) => p.id)
+  );
   const [hookText, setHookText] = useState(content.hookText || "");
   const [notes, setNotes] = useState(content.notes || "");
+  const [changesNote, setChangesNote] = useState(content.changesNote || "");
+  const [tagsInput, setTagsInput] = useState((content.tags || []).join(", "));
   const [workUrl, setWorkUrl] = useState(content.workUrl || "");
   const [plannedFor, setPlannedFor] = useState(content.plannedFor || "");
 
@@ -69,14 +103,28 @@ export function ContentStudioClient({
   const [checklist, setChecklist] = useState(content.checklist);
   const [newChecklistText, setNewChecklistText] = useState("");
 
+  // Reference linking state
+  const linkedRefIds = React.useMemo(
+    () => new Set(content.refs.map((r) => r.id)),
+    [content.refs]
+  );
+  const unlinkedRefs = React.useMemo(
+    () => studioOptions.availableRefs.filter((r) => !linkedRefIds.has(r.id)),
+    [studioOptions.availableRefs, linkedRefIds]
+  );
+  const [linkRefId, setLinkRefId] = useState(unlinkedRefs[0]?.id || "");
+
   // Add post dialog state
   const [isAddPostOpen, setIsAddPostOpen] = useState(false);
   const [postPlatformId, setPostPlatformId] = useState(masterData.platforms[0]?.id || "");
   const [postUrl, setPostUrl] = useState("");
   const [postCaption, setPostCaption] = useState("");
+  const [selectedSnippetId, setSelectedSnippetId] = useState("");
+  const [isGeneratingCaption, setIsGeneratingCaption] = useState(false);
 
   // Final rating state
   const [rating, setRating] = useState<number | null>(content.finalRating);
+  const [finalRatingNote, setFinalRatingNote] = useState(content.finalRatingNote || "");
 
   // AI Assistant states
   const [isGeneratingHooks, setIsGeneratingHooks] = useState(false);
@@ -84,13 +132,45 @@ export function ContentStudioClient({
   const [hookOptions, setHookOptions] = useState<GeneratedHook[]>([]);
   const [isHooksModalOpen, setIsHooksModalOpen] = useState(false);
 
+  React.useEffect(() => {
+    setChecklist(content.checklist);
+  }, [content.checklist]);
+
+  React.useEffect(() => {
+    if (!unlinkedRefs.some((r) => r.id === linkRefId)) {
+      setLinkRefId(unlinkedRefs[0]?.id || "");
+    }
+  }, [unlinkedRefs, linkRefId]);
+
+  const togglePillar = (id: string) => {
+    setSelectedPillars((prev) =>
+      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]
+    );
+  };
+
+  const parseTags = (raw: string) =>
+    Array.from(
+      new Set(
+        raw
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      )
+    ).slice(0, 30);
+
   const handleGenerateHooks = async () => {
     setIsGeneratingHooks(true);
     try {
+      const selectedFormatName =
+        masterData.formats.find((f) => f.id === formatId)?.name || content.format?.name;
+      const primaryPillarName =
+        masterData.pillars.find((p) => p.id === selectedPillars[0])?.name ||
+        content.pillars[0]?.name;
+
       const res = await aiGenerateHooks({
         topic: title,
-        pillar: content.pillars[0]?.name,
-        format: content.format?.name,
+        pillar: primaryPillarName,
+        format: selectedFormatName,
       });
 
       if (!res.ok) {
@@ -136,19 +216,68 @@ export function ContentStudioClient({
     }
   };
 
+  const handleGenerateCaption = async () => {
+    setIsGeneratingCaption(true);
+    try {
+      const platformName =
+        masterData.platforms.find((p) => p.id === postPlatformId)?.name || "Instagram Reels";
+      const res = await aiGenerateCaption({
+        title,
+        hookText,
+        notes,
+        platform: platformName,
+      });
+
+      if (!res.ok) {
+        toast.error(res.error.message);
+        return;
+      }
+
+      setPostCaption(res.data.caption);
+      toast.success("AI caption drafted");
+    } catch {
+      toast.error("Failed to generate caption");
+    } finally {
+      setIsGeneratingCaption(false);
+    }
+  };
+
+  const handleInsertSnippet = (snippetId: string) => {
+    setSelectedSnippetId("");
+    const snippet = studioOptions.snippets.find((s) => s.id === snippetId);
+    if (!snippet) return;
+    setPostCaption((prev) => (prev.trim() ? `${prev.trim()}\n\n${snippet.body}` : snippet.body));
+    toast.success(`Inserted snippet: ${snippet.title}`);
+  };
+
   const handleSaveDetails = () => {
+    if (!title.trim()) {
+      toast.error("Title is required");
+      return;
+    }
+
     startTransition(async () => {
       const res = await updateContent({
         id: content.id,
         title,
+        formatId: formatId || null,
+        seriesId: seriesId || null,
+        hookTypeId: hookTypeId || null,
+        audioId: audioId || null,
+        pillarIds: selectedPillars,
         hookText,
         notes,
+        changesNote,
+        tags: parseTags(tagsInput),
         workUrl: workUrl || null,
         plannedFor: plannedFor || null,
+        finalRating: rating,
+        finalRatingNote,
       });
 
       if (res.ok) {
-        toast.success("Content details saved");
+        toast.success("Content studio saved");
+        router.refresh();
       } else {
         toast.error(res.error.message);
       }
@@ -199,12 +328,25 @@ export function ContentStudioClient({
     });
   };
 
+  const handleLinkRef = () => {
+    if (!linkRefId) return;
+    startTransition(async () => {
+      const res = await linkReferenceToContent({ contentId: content.id, refId: linkRefId });
+      if (res.ok) {
+        toast.success("Reference linked to content");
+        router.refresh();
+      } else {
+        toast.error(res.error.message);
+      }
+    });
+  };
+
   const handleUnlinkRef = (refId: string) => {
-    if (!confirm("Unlink reference from this content? It will return to Selected.")) return;
     startTransition(async () => {
       const res = await unlinkReferenceFromContent({ contentId: content.id, refId });
       if (res.ok) {
         toast.success("Reference unlinked");
+        router.refresh();
       } else {
         toast.error(res.error.message);
       }
@@ -236,6 +378,7 @@ export function ContentStudioClient({
         setIsAddPostOpen(false);
         setPostUrl("");
         setPostCaption("");
+        router.refresh();
       } else {
         toast.error(res.error.message);
       }
@@ -243,11 +386,11 @@ export function ContentStudioClient({
   };
 
   const handleDeletePost = (postId: string) => {
-    if (!confirm("Delete post? Checkpoint tracking will also be removed.")) return;
     startTransition(async () => {
       const res = await deletePost({ postId, contentId: content.id });
       if (res.ok) {
         toast.success("Post deleted");
+        router.refresh();
       } else {
         toast.error(res.error.message);
       }
@@ -257,9 +400,41 @@ export function ContentStudioClient({
   const handleSetRating = (score: number) => {
     setRating(score);
     startTransition(async () => {
-      const res = await updateContent({ id: content.id, finalRating: score });
+      const res = await updateContent({
+        id: content.id,
+        finalRating: score,
+        finalRatingNote,
+      });
       if (res.ok) {
         toast.success(`Rated ${score}/5`);
+        router.refresh();
+      } else {
+        toast.error(res.error.message);
+      }
+    });
+  };
+
+  const handleArchiveToggle = () => {
+    startTransition(async () => {
+      const res = content.archivedAt
+        ? await restoreContent({ id: content.id })
+        : await archiveContent({ id: content.id });
+
+      if (res.ok) {
+        toast.success(content.archivedAt ? "Content restored" : "Content archived");
+        router.refresh();
+      } else {
+        toast.error(res.error.message);
+      }
+    });
+  };
+
+  const handlePermanentDelete = () => {
+    startTransition(async () => {
+      const res = await deleteContentPermanently({ id: content.id });
+      if (res.ok) {
+        toast.success("Content permanently deleted");
+        router.push("/contents");
       } else {
         toast.error(res.error.message);
       }
@@ -272,16 +447,66 @@ export function ContentStudioClient({
   return (
     <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
       {/* Top Header */}
-      <div className="flex items-center justify-between border-b border-border/80 pb-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap border-b border-border/80 pb-4">
         <Link
-          href="/contents"
+          href={content.archivedAt ? "/contents?archived=1" : "/contents"}
           className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="size-3.5" />
           <span>Back to Contents</span>
         </Link>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isPending}
+            onClick={handleArchiveToggle}
+            className="text-xs font-mono h-8 gap-1.5"
+          >
+            {content.archivedAt ? (
+              <>
+                <RotateCcw className="size-3.5" />
+                <span>Restore</span>
+              </>
+            ) : (
+              <>
+                <Archive className="size-3.5" />
+                <span>Archive</span>
+              </>
+            )}
+          </Button>
+
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isPending}
+                className="text-xs font-mono h-8 gap-1.5 text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10"
+              >
+                <Trash2 className="size-3.5" />
+                <span>Delete</span>
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete Content Permanently?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This removes &ldquo;{content.title}&rdquo;, its production checklist, published post logs, and evaluation snapshots. Linked references will automatically return to Selected status.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={handlePermanentDelete}>
+                  Delete Permanently
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
           <Button
             size="sm"
             onClick={() => setIsAddPostOpen(true)}
@@ -293,10 +518,29 @@ export function ContentStudioClient({
         </div>
       </div>
 
+      {/* Archived Banner */}
+      {content.archivedAt && (
+        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs font-mono">
+          <span className="text-foreground">
+            This content is archived ({new Date(content.archivedAt).toLocaleDateString()}) and hidden from active workflows.
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={isPending}
+            onClick={handleArchiveToggle}
+            className="h-7 text-xs font-mono gap-1.5 bg-background"
+          >
+            <RotateCcw className="size-3" />
+            <span>Restore to Active</span>
+          </Button>
+        </div>
+      )}
+
       {/* Main Content Info Card */}
       <div className="bg-card border border-border rounded-lg p-6 space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="space-y-2 flex-1">
+          <div className="space-y-2 flex-1 min-w-[240px]">
             <div className="flex items-center gap-2 flex-wrap">
               {content.format && (
                 <span className="text-xs font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-foreground text-background">
@@ -308,6 +552,16 @@ export function ContentStudioClient({
                   {content.series.name}
                 </span>
               )}
+              {content.hookType && (
+                <span className="text-xs font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
+                  Hook: {content.hookType.name}
+                </span>
+              )}
+              {content.audio && (
+                <span className="text-xs font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
+                  Audio: {content.audio.title}
+                </span>
+              )}
               <StatusBadge status={content.status} />
             </div>
 
@@ -316,8 +570,8 @@ export function ContentStudioClient({
             </h1>
           </div>
 
-          {/* Rating */}
-          <div className="flex flex-col items-end gap-1">
+          {/* Rating & Evaluation Note */}
+          <div className="flex flex-col items-end gap-2">
             <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
               Overall Evaluation Rating
             </span>
@@ -337,11 +591,17 @@ export function ContentStudioClient({
                 </button>
               ))}
             </div>
+            <Input
+              value={finalRatingNote}
+              onChange={(e) => setFinalRatingNote(e.target.value)}
+              placeholder="Takeaway / evaluation note..."
+              className="h-7 w-56 text-[11px] font-mono"
+            />
           </div>
         </div>
 
-        {/* Pillars */}
-        {content.pillars.length > 0 && (
+        {/* Pillars & Tags Summary */}
+        {(content.pillars.length > 0 || content.tags.length > 0) && (
           <div className="flex items-center gap-1.5 flex-wrap pt-1">
             {content.pillars.map((pillar) => (
               <span
@@ -351,23 +611,31 @@ export function ContentStudioClient({
                 {pillar.name}
               </span>
             ))}
+            {content.tags.map((tag) => (
+              <span
+                key={tag}
+                className="text-[11px] font-mono px-2 py-0.5 rounded border border-border/70 text-muted-foreground"
+              >
+                #{tag}
+              </span>
+            ))}
           </div>
         )}
       </div>
 
       {/* Studio Grid: 2 Columns */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column (2 Cols): Script & Notes */}
+        {/* Left Column (2 Cols): Script, Metadata & Posts */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Script Editor Card */}
-          <div className="bg-card border border-border rounded-lg p-6 space-y-4">
+          {/* Script & Metadata Editor Card */}
+          <div className="bg-card border border-border rounded-lg p-6 space-y-5">
             <div className="flex items-center justify-between border-b border-border/60 pb-3 flex-wrap gap-2">
               <h2 className="text-sm font-black font-display tracking-tight text-foreground flex items-center gap-1.5">
                 <FileText className="size-4" />
-                <span>Script & Production Notes</span>
+                <span>Studio Editor & Metadata</span>
               </h2>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <Button
                   type="button"
                   variant="outline"
@@ -407,7 +675,7 @@ export function ContentStudioClient({
                   className="text-xs font-mono h-7 bg-foreground text-background font-bold gap-1"
                 >
                   {isPending ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
-                  <span>Save</span>
+                  <span>Save Changes</span>
                 </Button>
               </div>
             </div>
@@ -422,6 +690,109 @@ export function ContentStudioClient({
                   onChange={(e) => setTitle(e.target.value)}
                   className="text-xs font-mono h-9"
                 />
+              </div>
+
+              {/* Classification Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    Format
+                  </Label>
+                  <select
+                    value={formatId}
+                    onChange={(e) => setFormatId(e.target.value)}
+                    className="w-full h-9 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
+                  >
+                    <option value="">-- Unset Format --</option>
+                    {masterData.formats.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    Series
+                  </Label>
+                  <select
+                    value={seriesId}
+                    onChange={(e) => setSeriesId(e.target.value)}
+                    className="w-full h-9 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
+                  >
+                    <option value="">-- Standalone Content --</option>
+                    {studioOptions.series.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    Hook Classification
+                  </Label>
+                  <select
+                    value={hookTypeId}
+                    onChange={(e) => setHookTypeId(e.target.value)}
+                    className="w-full h-9 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
+                  >
+                    <option value="">-- Unset Hook Type --</option>
+                    {masterData.hookTypes.map((ht) => (
+                      <option key={ht.id} value={ht.id}>
+                        {ht.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    Audio Track
+                  </Label>
+                  <select
+                    value={audioId}
+                    onChange={(e) => setAudioId(e.target.value)}
+                    className="w-full h-9 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
+                  >
+                    <option value="">-- No Track Selected --</option>
+                    {studioOptions.audios.map((audio) => (
+                      <option key={audio.id} value={audio.id}>
+                        {audio.title}
+                        {audio.artist ? ` — ${audio.artist}` : ""}
+                        {audio.isOriginal ? " (Original)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Pillars Selection */}
+              <div className="space-y-2">
+                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  Content Pillars
+                </Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {masterData.pillars.map((pillar) => {
+                    const isSelected = selectedPillars.includes(pillar.id);
+                    return (
+                      <button
+                        key={pillar.id}
+                        type="button"
+                        onClick={() => togglePillar(pillar.id)}
+                        className={`px-2.5 py-1 text-[11px] font-mono rounded border transition-all select-none ${
+                          isSelected
+                            ? "bg-foreground text-background border-foreground font-semibold"
+                            : "bg-secondary text-muted-foreground border-border hover:text-foreground"
+                        }`}
+                      >
+                        {pillar.name}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="space-y-1.5">
@@ -446,6 +817,31 @@ export function ContentStudioClient({
                   placeholder="Draft your script, scene breakdown, b-roll checklist..."
                   rows={8}
                   className="text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  What I Changed / Original Spin
+                </Label>
+                <Textarea
+                  value={changesNote}
+                  onChange={(e) => setChangesNote(e.target.value)}
+                  placeholder="How you adapted the angle, pacing, visual framing, or audience context..."
+                  rows={3}
+                  className="text-xs font-mono"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  Tags (comma-separated)
+                </Label>
+                <Input
+                  value={tagsInput}
+                  onChange={(e) => setTagsInput(e.target.value)}
+                  placeholder="lighting, tutorial, desk-tour"
+                  className="text-xs font-mono h-9"
                 />
               </div>
 
@@ -485,7 +881,7 @@ export function ContentStudioClient({
                   <span>Published Posts & Performance Checkpoints</span>
                 </h2>
                 <p className="text-[11px] font-mono text-muted-foreground">
-                  Posts auto-generate 24h, 7d, and 30d evaluation checkpoints
+                  Posts auto-generate 24h, 7d, and 30d evaluation checkpoints for eligible formats
                 </p>
               </div>
 
@@ -504,7 +900,7 @@ export function ContentStudioClient({
               <div className="p-8 text-center rounded border border-dashed border-border bg-secondary/30 space-y-2">
                 <Clock className="size-6 mx-auto text-muted-foreground" />
                 <p className="text-xs font-mono text-muted-foreground">
-                  Not published yet. When ready, click "Add Post" to record the live URL and start tracking checkpoints.
+                  Not published yet. When ready, click &ldquo;Add Post&rdquo; to record the live URL and start tracking checkpoints.
                 </p>
               </div>
             ) : (
@@ -546,40 +942,48 @@ export function ContentStudioClient({
                       </Button>
                     </div>
 
-                    {/* Checkpoints for this post */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-                      {post.snapshots.map((snap) => {
-                        const isDone = snap.status === "done";
-                        return (
-                          <div
-                            key={snap.id}
-                            className={`p-2.5 rounded border text-xs font-mono space-y-1 ${
-                              isDone
-                                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-400"
-                                : "bg-card border-border text-muted-foreground"
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold uppercase tracking-wider">
-                                {snap.checkpoint.toUpperCase()}
-                              </span>
-                              <StatusBadge status={snap.status} size="sm" />
-                            </div>
+                    {post.caption && (
+                      <p className="text-xs font-mono text-muted-foreground whitespace-pre-wrap border-l-2 border-border pl-2.5">
+                        {post.caption}
+                      </p>
+                    )}
 
-                            {isDone ? (
-                              <div className="text-[11px] font-mono text-foreground font-semibold">
-                                {snap.views !== null && `${snap.views} views`}
-                                {snap.rating !== null && ` • ${snap.rating}/5 rating`}
+                    {/* Checkpoints for this post */}
+                    {post.snapshots.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                        {post.snapshots.map((snap) => {
+                          const isDone = snap.status === "done";
+                          return (
+                            <div
+                              key={snap.id}
+                              className={`p-2.5 rounded border text-xs font-mono space-y-1 ${
+                                isDone
+                                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-800"
+                                  : "bg-card border-border text-muted-foreground"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold uppercase tracking-wider">
+                                  {snap.checkpoint.toUpperCase()}
+                                </span>
+                                <StatusBadge status={snap.status} size="sm" />
                               </div>
-                            ) : (
-                              <div className="text-[10px] text-muted-foreground/80">
-                                Due: {new Date(snap.dueAt).toLocaleDateString()}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+
+                              {isDone ? (
+                                <div className="text-[11px] font-mono text-foreground font-semibold">
+                                  {snap.views !== null && `${snap.views} views`}
+                                  {snap.rating !== null && ` • ${snap.rating}/5 rating`}
+                                </div>
+                              ) : (
+                                <div className="text-[10px] text-muted-foreground/80">
+                                  Due: {new Date(snap.dueAt).toLocaleDateString()}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -621,7 +1025,7 @@ export function ContentStudioClient({
                     className="flex items-center gap-2 text-left flex-1"
                   >
                     {item.isDone ? (
-                      <CheckSquare className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <CheckSquare className="size-4 text-emerald-600 shrink-0" />
                     ) : (
                       <Square className="size-4 text-muted-foreground shrink-0" />
                     )}
@@ -661,7 +1065,7 @@ export function ContentStudioClient({
           </div>
 
           {/* Linked References Card */}
-          <div className="bg-card border border-border rounded-lg p-5 space-y-3">
+          <div className="bg-card border border-border rounded-lg p-5 space-y-4">
             <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground flex items-center gap-1.5 border-b border-border/60 pb-3">
               <LinkIcon className="size-3.5" />
               <span>Linked References ({content.refs.length})</span>
@@ -702,20 +1106,53 @@ export function ContentStudioClient({
                 ))}
               </div>
             )}
+
+            {/* + Link existing reference */}
+            {unlinkedRefs.length > 0 && (
+              <div className="pt-2 border-t border-border/60 space-y-2">
+                <Label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                  Link Existing Reference
+                </Label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={linkRefId}
+                    onChange={(e) => setLinkRefId(e.target.value)}
+                    className="flex-1 min-w-0 h-8 px-2 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
+                  >
+                    {unlinkedRefs.map((ref) => (
+                      <option key={ref.id} value={ref.id}>
+                        [{ref.platformName}] {(ref.hookText || ref.url).slice(0, 48)}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={isPending || !linkRefId}
+                    onClick={handleLinkRef}
+                    className="h-8 px-2.5 text-xs font-mono gap-1 shrink-0"
+                  >
+                    <Plus className="size-3" />
+                    <span>Link</span>
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Add Post Dialog */}
       <Dialog open={isAddPostOpen} onOpenChange={setIsAddPostOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <form onSubmit={handleAddPost}>
             <DialogHeader>
               <DialogTitle className="text-lg font-black font-display tracking-tight">
                 Record Published Post
               </DialogTitle>
               <DialogDescription className="text-xs font-mono text-muted-foreground">
-                Recording a post marks this content as POSTED and schedules 24h, 7d, and 30d snapshots.
+                Recording a post marks this content as POSTED and schedules 24h, 7d, and 30d snapshots when supported by format.
               </DialogDescription>
             </DialogHeader>
 
@@ -750,15 +1187,51 @@ export function ContentStudioClient({
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                  Caption or Post Notes (Optional)
-                </Label>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    Caption or Post Notes (Optional)
+                  </Label>
+
+                  <div className="flex items-center gap-1.5">
+                    {studioOptions.snippets.length > 0 && (
+                      <select
+                        value={selectedSnippetId}
+                        onChange={(e) => handleInsertSnippet(e.target.value)}
+                        className="h-7 px-2 text-[11px] font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
+                      >
+                        <option value="">+ Insert Snippet</option>
+                        {studioOptions.snippets.map((sn) => (
+                          <option key={sn.id} value={sn.id}>
+                            [{sn.kind}] {sn.title}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isGeneratingCaption}
+                      onClick={handleGenerateCaption}
+                      className="h-7 px-2.5 text-[11px] font-mono gap-1"
+                    >
+                      {isGeneratingCaption ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <Sparkles className="size-3 text-amber-500 fill-amber-500" />
+                      )}
+                      <span>AI Write Caption</span>
+                    </Button>
+                  </div>
+                </div>
+
                 <Textarea
                   value={postCaption}
                   onChange={(e) => setPostCaption(e.target.value)}
-                  placeholder="Caption used..."
-                  rows={3}
+                  placeholder="Write caption, CTA, or hashtags..."
+                  rows={5}
                   className="text-xs font-mono"
                 />
               </div>
@@ -787,6 +1260,7 @@ export function ContentStudioClient({
           </form>
         </DialogContent>
       </Dialog>
+
       {/* Hook Picker Dialog */}
       <Dialog open={isHooksModalOpen} onOpenChange={setIsHooksModalOpen}>
         <DialogContent className="sm:max-w-lg">
@@ -816,10 +1290,10 @@ export function ContentStudioClient({
                   </span>
                 </div>
                 <p className="text-xs font-mono font-medium text-foreground">
-                  "{hook.text}"
+                  &ldquo;{hook.text}&rdquo;
                 </p>
                 <p className="text-[10px] font-mono text-muted-foreground">
-                  💡 {hook.whyItWorks}
+                  {hook.whyItWorks}
                 </p>
               </div>
             ))}

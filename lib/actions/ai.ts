@@ -9,7 +9,7 @@ import { getAppSettings } from "@/lib/queries/settings";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
 
-type AiFeature = "bedah" | "hooks" | "script" | "insight";
+type AiFeature = "bedah" | "hooks" | "script" | "insight" | "caption";
 
 async function executeWithAiGuard<T>(
   feature: AiFeature,
@@ -327,6 +327,48 @@ Rules:
 
     return {
       data: res.output,
+      inputTokens: res.usage?.inputTokens,
+      outputTokens: res.usage?.outputTokens,
+    };
+  });
+}
+
+const generateCaptionSchema = z.object({
+  title: z.string().min(1, "Title is required"),
+  hookText: z.string().optional(),
+  notes: z.string().optional(),
+  platform: z.string().optional(),
+});
+
+/**
+ * Generates a platform-ready social caption and relevant hashtags for a piece of content.
+ */
+export async function aiGenerateCaption(
+  input: z.infer<typeof generateCaptionSchema>
+): Promise<ActionResult<{ caption: string }>> {
+  const parsed = generateCaptionSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid input");
+  }
+
+  return executeWithAiGuard("caption", async ({ model, langInstruction }) => {
+    const res = await generateText({
+      model,
+      prompt: `Write an engaging, concise short-form video caption tailored for ${parsed.data.platform || "Instagram Reels / TikTok"}.
+Title: "${parsed.data.title}"
+Opening Hook: "${parsed.data.hookText || "None"}"
+Notes / Context: "${parsed.data.notes || "None"}"
+
+${langInstruction}
+Format cleanly with:
+1. A punchy 1-2 line opener complementing the video hook (do not repeat the exact spoken hook word-for-word if avoidable).
+2. A short actionable takeaway or conversation prompt CTA (save / comment).
+3. One blank line followed by 4-6 relevant, clean niche hashtags (no spammy generic tags).
+Return only the ready-to-paste caption text without markdown fences or preamble.`,
+    });
+
+    return {
+      data: { caption: res.text.trim() },
       inputTokens: res.usage?.inputTokens,
       outputTokens: res.usage?.outputTokens,
     };
