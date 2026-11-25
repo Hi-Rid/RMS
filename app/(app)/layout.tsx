@@ -34,7 +34,7 @@ function AppShellFallback() {
             RMS
           </span>
         </header>
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
           <DashboardSkeleton />
         </main>
       </div>

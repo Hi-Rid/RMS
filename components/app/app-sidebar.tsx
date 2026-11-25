@@ -253,7 +253,7 @@ function AppSidebarFrame({
         aria-label="Primary Sidebar Navigation"
         className={cn(
           "flex-1 min-h-0 overflow-y-auto overscroll-contain py-3 space-y-4",
-          collapsed ? "px-2" : "px-3"
+          collapsed ? "px-2" : "px-3 [scrollbar-gutter:stable]"
         )}
       >
         {/* Overview */}
