@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   ArrowRight,
@@ -30,7 +30,6 @@ import {
 } from "@/lib/actions/auth";
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") || "/";
   const urlError = searchParams.get("error");
@@ -77,8 +76,7 @@ function LoginForm() {
       const res = await signInWithPassword({ email, password });
       if (res.ok) {
         toast.success("Signed in!");
-        router.push(safeRedirectTarget);
-        router.refresh();
+        window.location.assign(safeRedirectTarget);
       } else {
         setErrorMsg(res.error.message);
         toast.error(res.error.message);
@@ -119,8 +117,7 @@ function LoginForm() {
       const res = await verifyLoginCode({ email, code });
       if (res.ok) {
         toast.success("Signed in!");
-        router.push(safeRedirectTarget);
-        router.refresh();
+        window.location.assign(safeRedirectTarget);
       } else {
         setErrorMsg(res.error.message);
         toast.error(res.error.message);

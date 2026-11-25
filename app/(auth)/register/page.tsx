@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   ArrowRight,
@@ -20,7 +20,6 @@ import { AuthShell } from "@/app/(auth)/_components/auth-shell";
 import { registerWithPassword } from "@/lib/actions/auth";
 
 function RegisterForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") || "/";
 
@@ -64,8 +63,7 @@ function RegisterForm() {
         toast.success("Account created! Check your email to verify.");
       } else {
         toast.success("Account created! Welcome to RMS.");
-        router.push(safeRedirectTarget);
-        router.refresh();
+        window.location.assign(safeRedirectTarget);
       }
     });
   };
