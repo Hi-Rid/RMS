@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   extractHandleFromProfileUrl,
   extractHashtagsFromText,
+  extractInstagramHydratedMedia,
   extractInstagramOrAuthorFromTitle,
   extractSharedText,
+  extractTikTokHydratedMedia,
   normalizeSocialHandle,
   parseAudioFromText,
   parseOpenGraphMeta,
@@ -96,6 +98,81 @@ describe("metadata extraction helpers", () => {
     expect(parseAudioFromText("Just a normal caption about filming")).toEqual({
       audioTitle: null,
       audioArtist: null,
+    });
+  });
+
+  it("extracts Instagram hydrated JSON video, audio, handle, and caption for target shortcode", () => {
+    const payload = {
+      items: [
+        {
+          code: "OTHER999",
+          caption: { text: "Wrong post caption" },
+          user: { username: "someone_else", full_name: "Other" },
+          video_versions: [{ url: "https://cdn.example.com/other.mp4" }],
+        },
+        {
+          code: "DeXUx-UOhwu",
+          caption: { text: "All black sidewalk fit check" },
+          user: { username: "utochkavtapkah", full_name: "VIRA" },
+          clips_metadata: {
+            music_info: null,
+            original_sound_info: {
+              original_audio_title: "Original audio",
+              ig_artist: { username: "utochkavtapkah" },
+            },
+          },
+          image_versions2: {
+            candidates: [{ url: "https://cdn.example.com/cover.jpg" }],
+          },
+          video_versions: [{ url: "https://cdn.example.com/reel.mp4" }],
+        },
+      ],
+    };
+    const html = `<html><script type="application/json">${JSON.stringify(payload)}</script></html>`;
+
+    const extracted = extractInstagramHydratedMedia(html, "DeXUx-UOhwu");
+    expect(extracted).toEqual({
+      caption: "All black sidewalk fit check",
+      authorName: "VIRA",
+      authorHandle: "utochkavtapkah",
+      coverUrl: "https://cdn.example.com/cover.jpg",
+      videoUrl: "https://cdn.example.com/reel.mp4",
+      audioTitle: "Original audio",
+      audioArtist: "utochkavtapkah",
+      accessibilityCaption: null,
+    });
+  });
+
+  it("extracts TikTok hydrated JSON video, music, creator, and description", () => {
+    const ttPayload = {
+      __DEFAULT_SCOPE__: {
+        "webapp.video-detail": {
+          itemInfo: {
+            itemStruct: {
+              desc: "Minimalist street OOTD #fashion #ootd",
+              author: { uniqueId: "style.creator", nickname: "Style Creator" },
+              music: { title: "Night Drive Synth", authorName: "DJ Test" },
+              video: {
+                cover: "https://cdn.example.com/tt-cover.jpg",
+                playAddr: "https://cdn.example.com/tt-video.mp4",
+              },
+            },
+          },
+        },
+      },
+    };
+    const html = `<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify(ttPayload)}</script>`;
+
+    const extracted = extractTikTokHydratedMedia(html);
+    expect(extracted).toEqual({
+      caption: "Minimalist street OOTD #fashion #ootd",
+      authorName: "Style Creator",
+      authorHandle: "style.creator",
+      coverUrl: "https://cdn.example.com/tt-cover.jpg",
+      videoUrl: "https://cdn.example.com/tt-video.mp4",
+      audioTitle: "Night Drive Synth",
+      audioArtist: "DJ Test",
+      accessibilityCaption: null,
     });
   });
 });

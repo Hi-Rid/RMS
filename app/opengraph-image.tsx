@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 import { RMS_CREST_PATH } from "@/components/app/brand-logo";
 
-export const alt = "RMS — Reference Management & Content Studio";
+export const alt = "RMS — Reference Management System";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -77,7 +77,7 @@ export default function OpenGraphImage() {
               color: "#6B6B62",
             }}
           >
-            Reference Management &amp; Content Studio
+            Reference Management System
           </div>
         </div>
       </div>

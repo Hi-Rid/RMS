@@ -103,7 +103,7 @@ export async function addPost(
     // 5. Recompute content status (transitions to "posted")
     await recomputeContent(tx, contentId);
 
-    revalidatePath("/");
+    revalidatePath("/home");
     revalidatePath("/contents");
     revalidatePath(`/contents/${contentId}`);
     revalidatePath("/evaluate");
@@ -148,7 +148,7 @@ export async function deletePost(
 
     await recomputeContent(tx, parsed.data.contentId);
 
-    revalidatePath("/");
+    revalidatePath("/home");
     revalidatePath("/contents");
     revalidatePath(`/contents/${parsed.data.contentId}`);
     revalidatePath("/evaluate");

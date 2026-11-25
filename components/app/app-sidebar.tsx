@@ -53,7 +53,7 @@ export function AppSidebar({
   const isMobileDrawer = Boolean(onClose);
 
   const isNavActive = (href: string) => {
-    if (href === "/") return pathname === "/";
+    if (href === "/home") return pathname === "/home";
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
@@ -84,7 +84,7 @@ export function AppSidebar({
           )}
         >
           <Link
-            href="/"
+            href="/home"
             onClick={onNavigate}
             className="flex items-center gap-2.5 min-w-0 group"
           >
@@ -197,10 +197,10 @@ export function AppSidebar({
         {/* Overview */}
         <div className="space-y-0.5">
           <NavItem
-            href="/"
+            href="/home"
             icon={<Home className="size-4" />}
             label="Home"
-            isActive={isNavActive("/")}
+            isActive={isNavActive("/home")}
             collapsed={collapsed}
             onClick={onNavigate}
           />

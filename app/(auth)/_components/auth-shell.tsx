@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { BrandLogo } from "@/components/app/brand-logo";
 
@@ -19,12 +20,14 @@ export function AuthShell({ children, footerText }: AuthShellProps) {
     <div className="flex min-h-dvh w-full items-center justify-center bg-background p-4 sm:p-6">
       <div className="w-full max-w-sm space-y-5">
         <div className="text-center space-y-1">
-          <BrandLogo className="inline-block size-12 mb-2" />
-          <h1 className="text-3xl font-black tracking-tight text-foreground font-display">
-            RMS
-          </h1>
+          <Link href="/" className="inline-block group" title="Back to RMS overview">
+            <BrandLogo className="inline-block size-12 mb-2 transition-transform group-hover:scale-105" />
+            <h1 className="text-3xl font-black tracking-tight text-foreground font-display">
+              RMS
+            </h1>
+          </Link>
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            Reference Management &amp; Content Studio
+            Reference Management System
           </p>
         </div>
 

@@ -51,7 +51,7 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
 
   const currentPageLabel = React.useMemo(() => {
-    if (pathname === "/") return "Home";
+    if (pathname === "/home") return "Home";
     for (const [prefix, label] of MOBILE_ROUTE_LABELS) {
       if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return label;
     }
@@ -115,7 +115,7 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
               </SheetContent>
             </Sheet>
 
-            <Link href="/" className="flex items-center gap-2 min-w-0">
+            <Link href="/home" className="flex items-center gap-2 min-w-0">
               <BrandLogo className="size-7" />
               <span className="font-display font-black text-base tracking-tight text-foreground">
                 RMS
@@ -158,10 +158,10 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
           className="md:hidden shrink-0 h-14 border-t border-border bg-card grid grid-cols-5 items-stretch"
         >
           <MobileTab
-            href="/"
+            href="/home"
             label="Home"
             icon={<Home className="size-4" />}
-            active={pathname === "/"}
+            active={pathname === "/home"}
           />
           <MobileTab
             href="/inbox"

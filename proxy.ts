@@ -11,14 +11,20 @@ export async function proxy(request: NextRequest) {
     pathname === "/register" ||
     pathname.startsWith("/register/");
 
-  // Static assets, public endpoints, and auth routes are exempt
+  const isDevRoute = pathname === "/dev" || pathname.startsWith("/dev/");
+  if (isDevRoute && process.env.NODE_ENV === "production") {
+    return new NextResponse("Not Found", { status: 404 });
+  }
+
+  // Static assets, public landing page, public endpoints, and auth routes are exempt
   const isPublicRoute =
+    pathname === "/" ||
     isAuthPage ||
     pathname.startsWith("/auth") ||
     pathname.startsWith("/api/ingest") ||
     pathname.startsWith("/api/cron") ||
     pathname.startsWith("/api/webhooks") ||
-    pathname.startsWith("/dev") ||
+    (isDevRoute && process.env.NODE_ENV !== "production") ||
     pathname.startsWith("/_next") ||
     pathname === "/manifest.webmanifest" ||
     pathname === "/favicon.ico" ||
@@ -45,9 +51,9 @@ export async function proxy(request: NextRequest) {
   const allowDevBypass =
     !hasSupabaseConfig && !ownerEmail && process.env.NODE_ENV === "development";
 
-  // Redirect authenticated users away from /login or /register to home
+  // Redirect authenticated users away from /login or /register to workspace home
   if (isAuthPage && hasVerifiedSession) {
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(new URL("/home", request.url));
   }
 
   // If protected route and neither verified session nor dev bypass, redirect to /login

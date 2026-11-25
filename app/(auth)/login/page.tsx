@@ -31,7 +31,7 @@ import {
 
 function LoginForm() {
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
+  const next = searchParams.get("next") || "/home";
   const urlError = searchParams.get("error");
 
   const [mode, setMode] = React.useState<"password" | "otp">("password");
@@ -58,7 +58,7 @@ function LoginForm() {
   }, [countdown]);
 
   const safeRedirectTarget =
-    next.startsWith("/") && !next.startsWith("//") ? next : "/";
+    next.startsWith("/") && !next.startsWith("//") ? next : "/home";
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -370,7 +370,7 @@ function LoginForm() {
           <div className="pt-3 border-t border-border/60 text-center text-xs font-mono text-muted-foreground">
             Don&apos;t have an account?{" "}
             <Link
-              href={next && next !== "/" ? `/register?next=${encodeURIComponent(next)}` : "/register"}
+              href={next && next !== "/home" && next !== "/" ? `/register?next=${encodeURIComponent(next)}` : "/register"}
               className="text-foreground font-semibold underline underline-offset-4 hover:opacity-80"
             >
               Register

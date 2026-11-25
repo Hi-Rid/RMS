@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local video clipping workspace assets (not for git or Vercel public deploy)
+/public/Clipping System/
+
+PRD-Folio-v2.md

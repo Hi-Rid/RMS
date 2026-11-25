@@ -15,6 +15,7 @@ import {
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
 import { recomputeContent } from "@/lib/domain/status";
+import { syncContentEmbedding } from "@/lib/ai/embeddings";
 
 const createContentSchema = z.object({
   title: z.string().min(1, "Title is required").max(200),
@@ -58,7 +59,12 @@ export async function createContent(
     tags,
   } = parsed.data;
 
-  return await withTx(async (tx) => {
+  const contentSearchText = [title, hookText || "", notes || "", changesNote || "", ...(tags || [])]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  const txResult = await withTx(async (tx) => {
     // 1. Insert content record
     const [created] = await tx
       .insert(contents)
@@ -76,10 +82,7 @@ export async function createContent(
         plannedFor: plannedFor || null,
         tags: tags || [],
         status: "production",
-        searchText: [title, hookText || "", notes || "", changesNote || "", ...(tags || [])]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase(),
+        searchText: contentSearchText,
       })
       .returning({ id: contents.id });
 
@@ -148,13 +151,23 @@ export async function createContent(
     // 5. Recompute status
     await recomputeContent(tx, contentId);
 
-    revalidatePath("/");
+    revalidatePath("/home");
     revalidatePath("/contents");
     revalidatePath("/inbox");
     revalidatePath("/references");
 
     return ok({ id: contentId });
   });
+
+  if (txResult.ok && contentSearchText) {
+    await syncContentEmbedding({
+      userId: user.id,
+      contentId: txResult.data.id,
+      text: contentSearchText,
+    }).catch(() => false);
+  }
+
+  return txResult;
 }
 
 const updateContentSchema = z.object({
@@ -186,8 +199,9 @@ export async function updateContent(
   }
 
   const { id, pillarIds, ...updates } = parsed.data;
+  let updatedSearchText = "";
 
-  return await withTx(async (tx) => {
+  const txResult = await withTx(async (tx) => {
     const [existing] = await tx
       .select({
         title: contents.title,
@@ -228,10 +242,11 @@ export async function updateContent(
     const mergedChanges =
       updates.changesNote !== undefined ? updates.changesNote : existing.changesNote || "";
     const mergedTags = updates.tags !== undefined ? updates.tags : existing.tags || [];
-    valuesToUpdate.searchText = [mergedTitle, mergedHook, mergedNotes, mergedChanges, ...mergedTags]
+    updatedSearchText = [mergedTitle, mergedHook, mergedNotes, mergedChanges, ...mergedTags]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
+    valuesToUpdate.searchText = updatedSearchText;
 
     await tx
       .update(contents)
@@ -256,12 +271,22 @@ export async function updateContent(
       }
     }
 
-    revalidatePath("/");
+    revalidatePath("/home");
     revalidatePath("/contents");
     revalidatePath(`/contents/${id}`);
 
     return ok({ id });
   });
+
+  if (txResult.ok && updatedSearchText) {
+    await syncContentEmbedding({
+      userId: user.id,
+      contentId: id,
+      text: updatedSearchText,
+    }).catch(() => false);
+  }
+
+  return txResult;
 }
 
 const toggleChecklistSchema = z.object({
@@ -503,7 +528,7 @@ export async function archiveContent(
 
   revalidatePath("/contents");
   revalidatePath(`/contents/${parsed.data.id}`);
-  revalidatePath("/");
+  revalidatePath("/home");
 
   return ok({ id: parsed.data.id });
 }
@@ -526,7 +551,7 @@ export async function restoreContent(
 
   revalidatePath("/contents");
   revalidatePath(`/contents/${parsed.data.id}`);
-  revalidatePath("/");
+  revalidatePath("/home");
 
   return ok({ id: parsed.data.id });
 }
@@ -569,7 +594,7 @@ export async function deleteContentPermanently(
     revalidatePath("/references");
     revalidatePath("/inbox");
     revalidatePath("/evaluate");
-    revalidatePath("/");
+    revalidatePath("/home");
 
     return ok({ id: parsed.data.id });
   });

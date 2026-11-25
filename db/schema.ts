@@ -482,6 +482,7 @@ export const appSettings = pgTable("app_settings", {
 	aiOutputLanguage: text("ai_output_language").default('id').notNull(),
 	aiAutoEnrich: boolean("ai_auto_enrich").default(true).notNull(),
 	aiIngestMode: text("ai_ingest_mode").default('inbox').notNull(),
+	aiApiKeyEnc: text("ai_api_key_enc"),
 	creatorNiche: text("creator_niche"),
 	creatorAudience: text("creator_audience"),
 	creatorVoice: text("creator_voice"),

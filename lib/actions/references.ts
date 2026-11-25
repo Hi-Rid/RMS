@@ -14,6 +14,7 @@ import {
   enrichReferenceById,
   runAiAgentForReference,
 } from "@/lib/ai/agent";
+import { syncReferenceEmbedding } from "@/lib/ai/embeddings";
 import { isAllowedRefTransition } from "@/lib/domain/status";
 import {
   getPlatformIdBySlug,
@@ -87,7 +88,7 @@ export async function createReferenceFromUrl(
         }).catch(() => null)
       : null;
 
-    revalidatePath("/");
+    revalidatePath("/home");
     revalidatePath("/inbox");
     revalidatePath("/references");
     revalidatePath("/contents");
@@ -168,7 +169,7 @@ export async function createReferencesFromText(
       let agentRes = null;
       if (!record.isDuplicate) {
         createdCount++;
-        if (enrichedBatchCount < 5) {
+        if (enrichedBatchCount < 3) {
           enrichedBatchCount++;
           agentRes = await runAiAgentForReference({
             userId: user.id,
@@ -205,7 +206,7 @@ export async function createReferencesFromText(
     }
   }
 
-  revalidatePath("/");
+  revalidatePath("/home");
   revalidatePath("/inbox");
   revalidatePath("/references");
   revalidatePath("/contents");
@@ -335,7 +336,7 @@ export async function importReferencesFromUrls(
         duplicates++;
       } else {
         created++;
-        if (enrichedImportCount < 5) {
+        if (enrichedImportCount < 3) {
           enrichedImportCount++;
           await runAiAgentForReference({
             userId: user.id,
@@ -353,7 +354,7 @@ export async function importReferencesFromUrls(
     }
   }
 
-  revalidatePath("/");
+  revalidatePath("/home");
   revalidatePath("/inbox");
   revalidatePath("/references");
   revalidatePath("/contents");
@@ -400,7 +401,7 @@ export async function enrichReferenceWithAgent(input: {
     return fail("ai_cap_reached", "Daily AI quota cap reached in Settings");
   }
 
-  revalidatePath("/");
+  revalidatePath("/home");
   revalidatePath("/inbox");
   revalidatePath("/references");
   revalidatePath(`/references/${parsed.data.id}`);
@@ -431,7 +432,7 @@ export async function enrichInboxBatch(): Promise<
   const user = await requireActionOwner();
   const summary = await enrichInboxBatchForUser(user.id, 5);
 
-  revalidatePath("/");
+  revalidatePath("/home");
   revalidatePath("/inbox");
   revalidatePath("/references");
   revalidatePath("/contents");
@@ -481,7 +482,7 @@ export async function setReferenceStatus(
     })
     .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)));
 
-  revalidatePath("/");
+  revalidatePath("/home");
   revalidatePath("/inbox");
   revalidatePath("/inbox/triage");
   revalidatePath("/references");
@@ -531,7 +532,7 @@ export async function skipReference(
     })
     .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)));
 
-  revalidatePath("/");
+  revalidatePath("/home");
   revalidatePath("/inbox");
   revalidatePath("/inbox/triage");
   revalidatePath("/references");
@@ -571,7 +572,7 @@ export async function unskipReference(
     return fail("not_found", "Reference not found");
   }
 
-  revalidatePath("/");
+  revalidatePath("/home");
   revalidatePath("/inbox");
   revalidatePath("/references");
 
@@ -601,7 +602,7 @@ export async function archiveReference(
 
   if (!updated) return fail("not_found", "Reference not found");
 
-  revalidatePath("/");
+  revalidatePath("/home");
   revalidatePath("/inbox");
   revalidatePath("/references");
 
@@ -627,7 +628,7 @@ export async function restoreReference(
 
   if (!updated) return fail("not_found", "Reference not found");
 
-  revalidatePath("/");
+  revalidatePath("/home");
   revalidatePath("/inbox");
   revalidatePath("/references");
 
@@ -660,7 +661,7 @@ export async function deleteReferencePermanently(
     .delete(refs)
     .where(and(eq(refs.id, parsed.data.id), eq(refs.userId, user.id)));
 
-  revalidatePath("/");
+  revalidatePath("/home");
   revalidatePath("/inbox");
   revalidatePath("/references");
 
@@ -710,8 +711,7 @@ export async function saveCapture(
     summary,
   } = parsed.data;
 
-  return await withTx(async (tx) => {
-    // 1. Fetch current ref scoped to user
+  const txResult = await withTx(async (tx) => {
     const [currentRef] = await tx
       .select({
         id: refs.id,
@@ -843,13 +843,27 @@ export async function saveCapture(
       }
     }
 
-    revalidatePath("/");
+    revalidatePath("/home");
     revalidatePath("/inbox");
     revalidatePath("/references");
     revalidatePath(`/references/${id}`);
 
-    return ok({ id });
+    return ok({ id, searchText });
   });
+
+  if (!txResult.ok) {
+    return txResult;
+  }
+
+  if (txResult.data.searchText) {
+    await syncReferenceEmbedding({
+      userId: user.id,
+      refId: id,
+      text: txResult.data.searchText,
+    }).catch(() => false);
+  }
+
+  return ok({ id });
 }
 
 const saveBedahSchema = z.object({
@@ -876,9 +890,17 @@ export async function saveBedah(
 
   const { id, hookText, hookTypeId, visualNotes, notes, elements } = parsed.data;
 
-  return await withTx(async (tx) => {
+  const txResult = await withTx(async (tx) => {
     const [existing] = await tx
-      .select({ id: refs.id })
+      .select({
+        id: refs.id,
+        url: refs.url,
+        summary: refs.summary,
+        hookText: refs.hookText,
+        visualNotes: refs.visualNotes,
+        notes: refs.notes,
+        tags: refs.tags,
+      })
       .from(refs)
       .where(and(eq(refs.id, id), eq(refs.userId, user.id)))
       .limit(1);
@@ -887,18 +909,33 @@ export async function saveBedah(
       return fail("not_found", "Reference not found");
     }
 
-    const updateValues: Record<string, any> = {};
+    const nextHookText = hookText !== undefined ? hookText : existing.hookText;
+    const nextVisualNotes = visualNotes !== undefined ? visualNotes : existing.visualNotes;
+    const nextNotes = notes !== undefined ? notes : existing.notes;
+    const nextSearchText = [
+      existing.url,
+      existing.summary || "",
+      nextHookText || "",
+      nextVisualNotes || "",
+      nextNotes || "",
+      ...(existing.tags || []),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    const updateValues: Record<string, any> = {
+      searchText: nextSearchText,
+    };
     if (hookText !== undefined) updateValues.hookText = hookText;
     if (hookTypeId !== undefined) updateValues.hookTypeId = hookTypeId;
     if (visualNotes !== undefined) updateValues.visualNotes = visualNotes;
     if (notes !== undefined) updateValues.notes = notes;
 
-    if (Object.keys(updateValues).length > 0) {
-      await tx
-        .update(refs)
-        .set(updateValues)
-        .where(and(eq(refs.id, id), eq(refs.userId, user.id)));
-    }
+    await tx
+      .update(refs)
+      .set(updateValues)
+      .where(and(eq(refs.id, id), eq(refs.userId, user.id)));
 
     if (elements) {
       await tx.delete(refElements).where(eq(refElements.refId, id));
@@ -914,7 +951,21 @@ export async function saveBedah(
 
     revalidatePath(`/references/${id}`);
     revalidatePath("/references");
-    return ok({ id });
+    return ok({ id, searchText: nextSearchText });
   });
+
+  if (!txResult.ok) {
+    return txResult;
+  }
+
+  if (txResult.data.searchText) {
+    await syncReferenceEmbedding({
+      userId: user.id,
+      refId: id,
+      text: txResult.data.searchText,
+    }).catch(() => false);
+  }
+
+  return ok({ id });
 }
 

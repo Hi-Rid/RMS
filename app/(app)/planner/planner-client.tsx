@@ -11,6 +11,8 @@ import {
   CheckSquare,
   ChevronLeft,
   ChevronRight,
+  Download,
+  GripVertical,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -41,6 +43,8 @@ export function PlannerClient({
   const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), "yyyy-MM-dd"));
   const [schedulingId, setSchedulingId] = useState<string | null>(null);
   const [scheduleDateInput, setScheduleDateInput] = useState<string>(format(new Date(), "yyyy-MM-dd"));
+  const [dragOverDate, setDragOverDate] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   // Sync props when router.refresh() resolves
   React.useEffect(() => {
@@ -107,6 +111,39 @@ export function PlannerClient({
           }
         }
         toast.success("Schedule cleared");
+        router.refresh();
+      } else {
+        toast.error(res.error.message);
+      }
+    });
+  };
+
+  const handleDropSchedule = (contentId: string, targetDateStr: string) => {
+    setDragOverDate(null);
+    setDraggingId(null);
+    if (!contentId || !targetDateStr) return;
+
+    const existingScheduled = scheduled.find((c) => c.id === contentId);
+    if (existingScheduled?.plannedFor === targetDateStr) return;
+
+    startTransition(async () => {
+      const res = await setContentSchedule({
+        contentId,
+        dateStr: targetDateStr,
+      });
+
+      if (res.ok) {
+        const draft = unscheduled.find((c) => c.id === contentId);
+        if (draft) {
+          setUnscheduled((prev) => prev.filter((c) => c.id !== contentId));
+          setScheduled((prev) => [...prev, { ...draft, plannedFor: targetDateStr }]);
+        } else {
+          setScheduled((prev) =>
+            prev.map((c) => (c.id === contentId ? { ...c, plannedFor: targetDateStr } : c))
+          );
+        }
+        setSelectedDate(targetDateStr);
+        toast.success(`Scheduled for ${targetDateStr}`);
         router.refresh();
       } else {
         toast.error(res.error.message);
@@ -196,6 +233,21 @@ export function PlannerClient({
                 >
                   <ChevronRight className="size-3.5" />
                 </Button>
+                <a
+                  href="/api/planner/ics"
+                  download="rms-planner.ics"
+                  title="Export scheduled content calendar (.ics)"
+                >
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-[11px] font-mono gap-1 ml-1"
+                  >
+                    <Download className="size-3" />
+                    <span>.ics</span>
+                  </Button>
+                </a>
               </div>
             </div>
 
@@ -204,6 +256,7 @@ export function PlannerClient({
                 const dayStr = format(day, "yyyy-MM-dd");
                 const isSelected = selectedDate === dayStr;
                 const isCurrentDay = isSameDay(day, today);
+                const isDragOver = dragOverDate === dayStr;
                 const dayContents = scheduled.filter((c) => c.plannedFor === dayStr);
 
                 return (
@@ -211,8 +264,27 @@ export function PlannerClient({
                     key={dayStr}
                     type="button"
                     onClick={() => setSelectedDate(dayStr)}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      if (dragOverDate !== dayStr) setDragOverDate(dayStr);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverDate === dayStr) setDragOverDate(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const droppedId = e.dataTransfer.getData("text/plain") || draggingId;
+                      if (droppedId) {
+                        handleDropSchedule(droppedId, dayStr);
+                      } else {
+                        setDragOverDate(null);
+                      }
+                    }}
                     className={`p-2.5 rounded-lg border text-center transition-all flex flex-col items-center gap-1 select-none ${
-                      isSelected
+                      isDragOver
+                        ? "ring-2 ring-emerald-500 border-emerald-500 bg-emerald-500/10 text-foreground"
+                        : isSelected
                         ? "bg-foreground text-background border-foreground font-bold"
                         : isCurrentDay
                         ? "bg-secondary/80 border-foreground/40 text-foreground"
@@ -269,8 +341,21 @@ export function PlannerClient({
                 {contentsOnSelectedDate.map((content) => (
                   <div
                     key={content.id}
-                    className="p-3.5 rounded-lg bg-secondary/30 border border-border/80 flex items-center justify-between gap-3 hover:border-foreground/30 transition-colors"
+                    draggable
+                    onDragStart={(e) => {
+                      setDraggingId(content.id);
+                      e.dataTransfer.setData("text/plain", content.id);
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    onDragEnd={() => {
+                      setDraggingId(null);
+                      setDragOverDate(null);
+                    }}
+                    className={`p-3.5 rounded-lg bg-secondary/30 border border-border/80 flex items-center justify-between gap-3 hover:border-foreground/30 transition-colors cursor-grab active:cursor-grabbing ${
+                      draggingId === content.id ? "opacity-50" : ""
+                    }`}
                   >
+                    <GripVertical className="size-3.5 text-muted-foreground shrink-0" />
                     <div className="space-y-1 flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-foreground text-background font-bold">
@@ -343,7 +428,7 @@ export function PlannerClient({
           </div>
 
           <p className="text-[11px] font-mono text-muted-foreground">
-            Contents in production without a planned publishing date.
+            Drag any card onto a day cell or click Schedule below.
           </p>
 
           {unscheduled.length === 0 ? (
@@ -355,10 +440,25 @@ export function PlannerClient({
               {unscheduled.map((draft) => (
                 <div
                   key={draft.id}
-                  className="p-3 rounded-lg border border-border bg-secondary/20 space-y-2.5"
+                  draggable
+                  onDragStart={(e) => {
+                    setDraggingId(draft.id);
+                    e.dataTransfer.setData("text/plain", draft.id);
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  onDragEnd={() => {
+                    setDraggingId(null);
+                    setDragOverDate(null);
+                  }}
+                  className={`p-3 rounded-lg border border-border bg-secondary/20 space-y-2.5 cursor-grab active:cursor-grabbing transition-opacity ${
+                    draggingId === draft.id ? "opacity-50" : ""
+                  }`}
                 >
                   <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
-                    <span className="uppercase">{draft.formatName || "Video"}</span>
+                    <span className="uppercase flex items-center gap-1">
+                      <GripVertical className="size-3 shrink-0" />
+                      <span>{draft.formatName || "Video"}</span>
+                    </span>
                     <div className="flex items-center gap-2">
                       {draft.checklistTotal > 0 && (
                         <span className="flex items-center gap-1">

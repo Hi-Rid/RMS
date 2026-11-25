@@ -8,6 +8,7 @@ import {
   Camera,
   Video,
   Film,
+  X,
 } from "lucide-react";
 
 interface ReferencePreviewProps {
@@ -27,6 +28,43 @@ function extractYouTubeId(url: string): string | null {
     /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/
   );
   return match ? match[1] : null;
+}
+
+function extractTikTokId(url: string): string | null {
+  if (!url) return null;
+  const match = url.match(/tiktok\.com\/(?:[^/]+\/video\/|v\/)(\d+)/i);
+  return match ? match[1] : null;
+}
+
+function extractInstagramEmbedUrl(url: string): string | null {
+  if (!url) return null;
+  const match = url.match(
+    /instagram\.com\/(?:[^/]+\/)?(reel|reels|p|tv)\/([A-Za-z0-9_-]+)/i
+  );
+  if (!match) return null;
+  const rawKind = match[1].toLowerCase();
+  const kind = rawKind === "reels" ? "reel" : rawKind;
+  return `https://www.instagram.com/${kind}/${match[2]}/embed`;
+}
+
+function resolveInlineEmbedUrl(url: string, platformSlug: string): string | null {
+  const yt = extractYouTubeId(url);
+  if (yt) {
+    return `https://www.youtube-nocookie.com/embed/${yt}?autoplay=1&rel=0`;
+  }
+
+  const slug = platformSlug.toLowerCase();
+  if (slug === "tiktok" || url.toLowerCase().includes("tiktok.com")) {
+    const tt = extractTikTokId(url);
+    if (tt) return `https://www.tiktok.com/embed/v2/${tt}`;
+  }
+
+  if (slug === "instagram" || url.toLowerCase().includes("instagram.com")) {
+    const ig = extractInstagramEmbedUrl(url);
+    if (ig) return ig;
+  }
+
+  return null;
 }
 
 function getPlatformDetails(platformSlug: string) {
@@ -96,8 +134,10 @@ export function ReferencePreview({
   className = "",
 }: ReferencePreviewProps) {
   const [imageError, setImageError] = useState(false);
+  const [playingInline, setPlayingInline] = useState(false);
   const details = getPlatformDetails(platform);
   const youtubeId = extractYouTubeId(url);
+  const embedUrl = resolveInlineEmbedUrl(url, platform);
   const PlatformIcon = details.icon;
 
   const isVertical =
@@ -129,134 +169,221 @@ export function ReferencePreview({
     <div
       className={`relative w-full ${containerAspect} rounded-md overflow-hidden bg-secondary/80 border ${details.border} group/preview`}
     >
-      {activeThumbnail ? (
-        <div className="relative w-full h-full overflow-hidden flex items-center justify-center bg-black/95">
-          {/* Ambient Blurred Background (Fills left and right empty spaces with matching video blur) */}
-          <img
-            src={activeThumbnail}
-            alt=""
-            aria-hidden="true"
-            className="absolute inset-0 w-full h-full object-cover blur-2xl scale-125 opacity-40 brightness-75 select-none pointer-events-none"
+      {playingInline && embedUrl ? (
+        <div className="relative w-full h-full bg-black">
+          <iframe
+            src={embedUrl}
+            title={hookText || summary || "Embedded video player"}
+            className="w-full h-full border-0"
+            allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+            allowFullScreen
+            loading="lazy"
           />
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-md pointer-events-none" />
-
-          {/* Uncropped 9:16 Video Thumbnail in Center */}
-          <div className="relative z-10 h-full w-full flex items-center justify-center p-0">
-            <img
-              src={activeThumbnail}
-              alt={hookText || summary || "Reference Preview"}
-              loading="lazy"
-              onError={() => setImageError(true)}
-              className="h-full w-auto max-w-full object-contain aspect-[9/16] shadow-2xl select-none transition-transform duration-300 group-hover/preview:scale-[1.02]"
-            />
+          <div className="absolute top-2.5 right-2.5 z-40 flex items-center gap-1.5">
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open original video"
+              onClick={(e) => e.stopPropagation()}
+              className="size-7 rounded-md bg-black/80 hover:bg-black text-white flex items-center justify-center shadow-sm border border-white/15"
+            >
+              <ExternalLink className="size-3.5" />
+            </a>
+            <button
+              type="button"
+              title="Close inline player"
+              aria-label="Close inline player"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setPlayingInline(false);
+              }}
+              className="size-7 rounded-md bg-black/80 hover:bg-black text-white flex items-center justify-center shadow-sm border border-white/15"
+            >
+              <X className="size-3.5" />
+            </button>
           </div>
-
-          {/* Center Play Button Watermark */}
-          <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
-            <div className="size-11 rounded-full bg-black/55 border border-white/20 backdrop-blur-sm flex items-center justify-center text-white shadow-xl transition-transform duration-200 group-hover/preview:scale-110">
-              <Play className="size-5 ml-0.5 fill-current text-white" />
-            </div>
-          </div>
-
-          {/* Vignette gradient overlay */}
-          <div className="absolute inset-0 z-15 pointer-events-none bg-gradient-to-t from-black/70 via-transparent to-black/30" />
         </div>
       ) : (
-        /* Stylized Media Poster Substrate (PRD §12.0) */
-        <div
-          className={`w-full h-full p-3.5 flex flex-col justify-between bg-gradient-to-br ${details.gradient} relative select-none`}
-        >
-          {/* Subtle blueprint grid overlay */}
-          <div
-            className="absolute inset-0 opacity-[0.07] pointer-events-none"
-            style={{
-              backgroundImage:
-                "linear-gradient(to right, currentColor 1px, transparent 1px), linear-gradient(to bottom, currentColor 1px, transparent 1px)",
-              backgroundSize: "16px 16px",
-            }}
-          />
+        <>
+          {activeThumbnail ? (
+            <div className="relative w-full h-full overflow-hidden flex items-center justify-center bg-black/95">
+              {/* Ambient Blurred Background (Fills left and right empty spaces with matching video blur) */}
+              <img
+                src={activeThumbnail}
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 w-full h-full object-cover blur-2xl scale-125 opacity-40 brightness-75 select-none pointer-events-none"
+              />
+              <div className="absolute inset-0 bg-black/30 backdrop-blur-md pointer-events-none" />
 
-          {/* Top Row: Platform Badge & Format */}
-          <div className="relative z-10 flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <span
-                className={`text-[10px] font-mono uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${details.pillBg} flex items-center gap-1 shadow-none`}
-              >
+              {/* Uncropped 9:16 Video Thumbnail in Center */}
+              <div className="relative z-10 h-full w-full flex items-center justify-center p-0">
+                <img
+                  src={activeThumbnail}
+                  alt={hookText || summary || "Reference Preview"}
+                  loading="lazy"
+                  onError={() => setImageError(true)}
+                  className="h-full w-auto max-w-full object-contain aspect-[9/16] shadow-2xl select-none transition-transform duration-300 group-hover/preview:scale-[1.02]"
+                />
+              </div>
+
+              {/* Center Play Button (Interactive when inline embed is available) */}
+              <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+                {embedUrl ? (
+                  <button
+                    type="button"
+                    aria-label="Play video inline"
+                    title="Play video inline"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setPlayingInline(true);
+                    }}
+                    className="pointer-events-auto size-11 rounded-full bg-black/65 hover:bg-black/85 border border-white/25 backdrop-blur-sm flex items-center justify-center text-white shadow-xl transition-transform duration-200 hover:scale-110 cursor-pointer"
+                  >
+                    <Play className="size-5 ml-0.5 fill-current text-white" />
+                  </button>
+                ) : (
+                  <div className="size-11 rounded-full bg-black/55 border border-white/20 backdrop-blur-sm flex items-center justify-center text-white shadow-xl transition-transform duration-200 group-hover/preview:scale-110">
+                    <Play className="size-5 ml-0.5 fill-current text-white" />
+                  </div>
+                )}
+              </div>
+
+              {/* Vignette gradient overlay */}
+              <div className="absolute inset-0 z-15 pointer-events-none bg-gradient-to-t from-black/70 via-transparent to-black/30" />
+            </div>
+          ) : (
+            /* Stylized Media Poster Substrate (PRD §12.0) */
+            <div
+              className={`w-full h-full p-3.5 flex flex-col justify-between bg-gradient-to-br ${details.gradient} relative select-none`}
+            >
+              {/* Subtle blueprint grid overlay */}
+              <div
+                className="absolute inset-0 opacity-[0.07] pointer-events-none"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(to right, currentColor 1px, transparent 1px), linear-gradient(to bottom, currentColor 1px, transparent 1px)",
+                  backgroundSize: "16px 16px",
+                }}
+              />
+
+              {/* Top Row: Platform Badge & Format */}
+              <div className="relative z-10 flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={`text-[10px] font-mono uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${details.pillBg} flex items-center gap-1 shadow-none`}
+                  >
+                    <PlatformIcon className="size-3" />
+                    <span>{details.name}</span>
+                  </span>
+                  {format && (
+                    <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-background/80 text-foreground/80 border border-border/80">
+                      {format}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Center: Play watermark or quotation teaser */}
+              <div className="relative z-10 my-auto py-1">
+                {hookText ? (
+                  <p className="text-xs font-mono font-bold text-foreground line-clamp-2 leading-snug drop-shadow-sm">
+                    &ldquo;{hookText}&rdquo;
+                  </p>
+                ) : summary ? (
+                  <p className="text-xs font-mono text-foreground/90 line-clamp-2 leading-relaxed">
+                    {summary}
+                  </p>
+                ) : (
+                  <div className="flex items-center justify-center">
+                    {embedUrl ? (
+                      <button
+                        type="button"
+                        aria-label="Play video inline"
+                        title="Play video inline"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setPlayingInline(true);
+                        }}
+                        className="size-10 rounded-full bg-background/85 hover:bg-background border border-border/80 flex items-center justify-center text-foreground hover:scale-110 transition-transform cursor-pointer"
+                      >
+                        <Play className="size-4 ml-0.5 fill-current text-foreground" />
+                      </button>
+                    ) : (
+                      <div className="size-10 rounded-full bg-background/80 border border-border/80 flex items-center justify-center text-foreground group-hover/preview:scale-110 transition-transform">
+                        <Play className="size-4 ml-0.5 fill-current text-foreground" />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Persistent Top Overlay: Platform Badge (when image thumbnail is active) */}
+          {activeThumbnail && (
+            <div className="absolute top-2 left-2 z-30 flex items-center gap-1 pointer-events-none">
+              <span className="text-[10px] font-mono uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border bg-black/75 text-white border-white/20 flex items-center gap-1 backdrop-blur-xs">
                 <PlatformIcon className="size-3" />
                 <span>{details.name}</span>
               </span>
               {format && (
-                <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-background/80 text-foreground/80 border border-border/80">
+                <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/65 text-white/90 border border-white/20 backdrop-blur-xs">
                   {format}
                 </span>
               )}
             </div>
-          </div>
+          )}
 
-          {/* Center: Play watermark or quotation teaser */}
-          <div className="relative z-10 my-auto py-1">
-            {hookText ? (
-              <p className="text-xs font-mono font-bold text-foreground line-clamp-2 leading-snug drop-shadow-sm">
-                &ldquo;{hookText}&rdquo;
-              </p>
-            ) : summary ? (
-              <p className="text-xs font-mono text-foreground/90 line-clamp-2 leading-relaxed">
-                {summary}
-              </p>
+          {/* Persistent Bottom Bar on Preview */}
+          <div className="absolute inset-x-0 bottom-0 p-2.5 z-30 flex items-center justify-between pointer-events-none text-white drop-shadow-sm">
+            <div className="flex items-center gap-1.5">
+              {handle && (
+                <span className="text-[11px] font-mono font-bold bg-black/70 px-1.5 py-0.5 rounded backdrop-blur-xs text-white/95 border border-white/10">
+                  @{handle}
+                </span>
+              )}
+            </div>
+
+            {embedUrl ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setPlayingInline(true);
+                }}
+                title="Play video inline"
+                className="pointer-events-auto flex items-center gap-1 text-[10px] font-mono uppercase font-bold bg-black/75 hover:bg-black px-2 py-0.5 rounded backdrop-blur-xs text-white border border-white/20 cursor-pointer"
+              >
+                <Play className="size-2.5 fill-current" />
+                <span>Play Inline</span>
+              </button>
             ) : (
-              <div className="flex items-center justify-center">
-                <div className="size-10 rounded-full bg-background/80 border border-border/80 flex items-center justify-center text-foreground group-hover/preview:scale-110 transition-transform">
-                  <Play className="size-4 ml-0.5 fill-current text-foreground" />
-                </div>
+              <div className="flex items-center gap-1 text-[10px] font-mono uppercase font-bold bg-black/70 px-2 py-0.5 rounded backdrop-blur-xs text-white/95 border border-white/10">
+                <Play className="size-2.5 fill-current" />
+                <span>{details.badge}</span>
               </div>
             )}
           </div>
-        </div>
+
+          {/* Hover Quick Action: External Link */}
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open original video"
+            onClick={(e) => e.stopPropagation()}
+            className="absolute top-2.5 right-2.5 z-30 size-7 rounded-md bg-black/70 hover:bg-black text-white flex items-center justify-center transition-all opacity-90 hover:opacity-100 shadow-sm border border-white/10"
+          >
+            <ExternalLink className="size-3.5" />
+          </a>
+        </>
       )}
-
-      {/* Persistent Top Overlay: Platform Badge (when image thumbnail is active) */}
-      {activeThumbnail && (
-        <div className="absolute top-2 left-2 z-30 flex items-center gap-1 pointer-events-none">
-          <span className="text-[10px] font-mono uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border bg-black/75 text-white border-white/20 flex items-center gap-1 backdrop-blur-xs">
-            <PlatformIcon className="size-3" />
-            <span>{details.name}</span>
-          </span>
-          {format && (
-            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/65 text-white/90 border border-white/20 backdrop-blur-xs">
-              {format}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Persistent Bottom Bar on Preview */}
-      <div className="absolute inset-x-0 bottom-0 p-2.5 z-30 flex items-center justify-between pointer-events-none text-white drop-shadow-sm">
-        <div className="flex items-center gap-1.5">
-          {handle && (
-            <span className="text-[11px] font-mono font-bold bg-black/70 px-1.5 py-0.5 rounded backdrop-blur-xs text-white/95 border border-white/10">
-              @{handle}
-            </span>
-          )}
-        </div>
-
-        {/* Center/Right Play Watermark Indicator */}
-        <div className="flex items-center gap-1 text-[10px] font-mono uppercase font-bold bg-black/70 px-2 py-0.5 rounded backdrop-blur-xs text-white/95 border border-white/10">
-          <Play className="size-2.5 fill-current" />
-          <span>{details.badge}</span>
-        </div>
-      </div>
-
-      {/* Hover Quick Action: External Link */}
-      <a
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        title="Open original video"
-        onClick={(e) => e.stopPropagation()}
-        className="absolute top-2.5 right-2.5 z-30 size-7 rounded-md bg-black/70 hover:bg-black text-white flex items-center justify-center transition-all opacity-90 hover:opacity-100 shadow-sm border border-white/10"
-      >
-        <ExternalLink className="size-3.5" />
-      </a>
     </div>
   );
 }

@@ -40,19 +40,19 @@ function resolveMetadataBase(): URL {
 export const metadata: Metadata = {
   metadataBase: resolveMetadataBase(),
   title: { default: "RMS", template: "%s · RMS" },
-  description: "Reference Management & Content Studio.",
+  description: "Reference Management System.",
   applicationName: "RMS",
   appleWebApp: { capable: true, title: "RMS", statusBarStyle: "default" },
   openGraph: {
     type: "website",
     siteName: "RMS",
-    title: "RMS — Reference Management & Content Studio",
-    description: "Reference Management & Content Studio.",
+    title: "RMS — Reference Management System",
+    description: "Reference Management System.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "RMS — Reference Management & Content Studio",
-    description: "Reference Management & Content Studio.",
+    title: "RMS — Reference Management System",
+    description: "Reference Management System.",
   },
 };
 

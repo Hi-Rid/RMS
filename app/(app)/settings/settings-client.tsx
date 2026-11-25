@@ -9,7 +9,6 @@ import {
   Cpu,
   CheckCircle2,
   AlertCircle,
-  ExternalLink,
   ShieldCheck,
   Download,
   Terminal,
@@ -27,6 +26,7 @@ import {
   Pencil,
   ArrowUp,
   ArrowDown,
+  Upload,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,6 +55,8 @@ import { IngestTokenCard } from "./ingest-token-card";
 import {
   updateGeneralSettings,
   updateAiSettings,
+  updatePersonalAiKey,
+  importWorkspaceBackup,
   testAiConnection,
   toggleMasterItem,
   createMasterItem,
@@ -149,6 +151,15 @@ export function SettingsClient({
   const [creatorVoice, setCreatorVoice] = useState(initialSettings.creatorVoice || "");
   const [testingConnection, setTestingConnection] = useState(false);
   const [savingAi, setSavingAi] = useState(false);
+  const [personalKeyInput, setPersonalKeyInput] = useState("");
+  const [hasPersonalAiKey, setHasPersonalAiKey] = useState(
+    Boolean(initialSettings.hasPersonalAiKey)
+  );
+  const [savingPersonalKey, setSavingPersonalKey] = useState(false);
+
+  // Data restore state
+  const [importingBackup, setImportingBackup] = useState(false);
+  const [importSummaryText, setImportSummaryText] = useState<string | null>(null);
 
   // Master data state
   const [master, setMaster] = useState(masterData);
@@ -258,6 +269,62 @@ export function SettingsClient({
       toast.error("Network error testing AI connection.");
     } finally {
       setTestingConnection(false);
+    }
+  }
+
+  async function handleSavePersonalKey(clear = false) {
+    if (!clear && personalKeyInput.trim().length < 12) {
+      toast.error("Please enter a valid AI API key (at least 12 characters).");
+      return;
+    }
+
+    setSavingPersonalKey(true);
+    try {
+      const res = await updatePersonalAiKey({
+        apiKey: clear ? null : personalKeyInput.trim(),
+      });
+      if (res.ok) {
+        setHasPersonalAiKey(res.data.hasPersonalAiKey);
+        setPersonalKeyInput("");
+        toast.success(
+          clear
+            ? "Personal AI key removed. Workspace default engine active."
+            : "Personal AI key encrypted and saved."
+        );
+        router.refresh();
+      } else {
+        toast.error(res.error.message || "Failed to update personal AI key.");
+      }
+    } catch {
+      toast.error("Network error saving personal AI key.");
+    } finally {
+      setSavingPersonalKey(false);
+    }
+  }
+
+  async function handleBackupFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setImportingBackup(true);
+    setImportSummaryText(null);
+    try {
+      const jsonText = await file.text();
+      const res = await importWorkspaceBackup({ jsonText });
+      if (res.ok) {
+        const s = res.data;
+        const msg = `Imported ${s.importedMaster} taxonomy item(s), ${s.importedRefs} reference(s), ${s.importedContents} studio content(s), and ${s.importedSnippets} snippet(s).${s.skippedDuplicates > 0 ? ` (${s.skippedDuplicates} existing URL duplicates skipped.)` : ""}`;
+        setImportSummaryText(msg);
+        toast.success("Backup restored successfully.");
+        router.refresh();
+      } else {
+        toast.error(res.error.message || "Failed to import backup JSON.");
+      }
+    } catch {
+      toast.error("Failed to read or parse backup JSON file.");
+    } finally {
+      setImportingBackup(false);
     }
   }
 
@@ -743,45 +810,54 @@ export function SettingsClient({
         {/* Tab 4: AI Automation */}
         <TabsContent value="ai" className="space-y-6 focus-visible:outline-none">
           {/* Status Banner */}
-          <div
-            className={`p-4 rounded-xl border flex items-start justify-between gap-3.5 flex-wrap ${
-              hasGeminiKey && aiEnabled
-                ? "bg-primary/5 border-primary/30 text-foreground"
-                : "bg-amber-500/10 border-amber-500/30 text-foreground"
-            }`}
-          >
-            <div className="flex items-start gap-3.5">
-              {hasGeminiKey && aiEnabled ? (
-                <CheckCircle2 className="size-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-              ) : (
-                <AlertCircle className="size-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-              )}
-              <div className="space-y-1 text-xs">
-                <div className="font-bold flex items-center gap-2 font-display text-sm">
-                  <span>Google Gemini API (Free Tier)</span>
-                  <span
-                    className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded ${
-                      hasGeminiKey && aiEnabled
-                        ? "bg-emerald-600 text-white"
-                        : "bg-amber-600 text-white"
-                    }`}
-                  >
-                    {!hasGeminiKey ? "Key Required" : aiEnabled ? "Connected & Active" : "Disabled"}
-                  </span>
+          {(() => {
+            const effectiveAiKeyReady = hasGeminiKey || hasPersonalAiKey;
+            return (
+              <div
+                className={`p-4 rounded-xl border flex items-start justify-between gap-3.5 flex-wrap ${
+                  effectiveAiKeyReady && aiEnabled
+                    ? "bg-primary/5 border-primary/30 text-foreground"
+                    : "bg-amber-500/10 border-amber-500/30 text-foreground"
+                }`}
+              >
+                <div className="flex items-start gap-3.5">
+                  {effectiveAiKeyReady && aiEnabled ? (
+                    <CheckCircle2 className="size-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="size-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-1 text-xs">
+                    <div className="font-bold flex items-center gap-2 font-display text-sm">
+                      <span>RMS AI Engine</span>
+                      <span
+                        className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded ${
+                          effectiveAiKeyReady && aiEnabled
+                            ? "bg-emerald-600 text-white"
+                            : "bg-amber-600 text-white"
+                        }`}
+                      >
+                        {!effectiveAiKeyReady
+                          ? "Key Required"
+                          : aiEnabled
+                          ? "Connected & Active"
+                          : "Disabled"}
+                      </span>
+                    </div>
+                    <p className="text-muted-foreground leading-relaxed max-w-2xl">
+                      {effectiveAiKeyReady
+                        ? "Automated reference breakdown, metadata enrichment, script drafting, and outlier synthesis run cleanly through the built-in RMS AI Engine."
+                        : "Add your personal AI API key below to activate Auto-Breakdown and the Autonomous AI Agent."}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-muted-foreground leading-relaxed max-w-2xl">
-                  {hasGeminiKey
-                    ? "Free-tier requests may be used by Google to improve products. Only minimum text context is sent when you trigger an AI action."
-                    : "Add your Google Generative AI API Key to .env.local (GOOGLE_GENERATIVE_AI_API_KEY) to activate Auto-Bedah and AI generation."}
-                </p>
-              </div>
-            </div>
 
-            <div className="text-xs font-mono px-3 py-1.5 rounded-md border border-border bg-card">
-              Today: <strong>{initialSettings.aiUsedToday}</strong> /{" "}
-              {aiDailyCap === 0 ? "∞" : aiDailyCap}
-            </div>
-          </div>
+                <div className="text-xs font-mono px-3 py-1.5 rounded-md border border-border bg-card">
+                  Today: <strong>{initialSettings.aiUsedToday}</strong> /{" "}
+                  {aiDailyCap === 0 ? "∞" : aiDailyCap}
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Configuration Form */}
@@ -799,38 +875,20 @@ export function SettingsClient({
                   <div className="space-y-0.5">
                     <div className="font-bold font-display text-foreground">Enable AI Features</div>
                     <div className="text-[11px] text-muted-foreground">
-                      Turns on Auto-Bedah, Hook generation, and Outlier patterns
+                      Turns on Auto-Breakdown, Hook generation, and Outlier pattern analysis
                     </div>
                   </div>
                   <Switch checked={aiEnabled} onCheckedChange={setAiEnabled} />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                    Provider
-                  </label>
-                  <select
-                    value={aiProvider}
-                    onChange={(e) => setAiProvider(e.target.value)}
-                    className="w-full h-8 rounded-md border border-border bg-background px-2.5 text-xs font-mono text-foreground focus:outline-none"
-                  >
-                    <option value="google">Google Gemini (Recommended - Free Tier)</option>
-                    <option value="groq">Groq</option>
-                    <option value="openrouter">OpenRouter</option>
-                  </select>
-                </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <label className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                      Text Model Override
+                      AI Engine Profile
                     </label>
-                    <Input
-                      placeholder="gemini-flash-lite-latest"
-                      value={aiTextModel}
-                      onChange={(e) => setAiTextModel(e.target.value)}
-                      className="font-mono text-xs"
-                    />
+                    <div className="h-9 rounded-md border border-border bg-secondary/40 px-2.5 flex items-center text-xs font-mono text-foreground">
+                      Managed RMS AI Engine (Auto)
+                    </div>
                   </div>
 
                   <div className="space-y-1.5">
@@ -915,7 +973,7 @@ export function SettingsClient({
                         Creator Persona Profile
                       </h4>
                       <p className="text-[11px] text-muted-foreground">
-                        Used by your AI Content Agent across auto-ingest, Bedah, Hooks, Script Drafting, and Captions.
+                        Used by your AI Content Agent across auto-ingest, Breakdowns, Hooks, Script Drafting, and Captions.
                       </p>
                     </div>
 
@@ -985,45 +1043,84 @@ export function SettingsClient({
               </CardContent>
             </Card>
 
-            {/* How to Setup Free Key */}
+            {/* Personal AI API Key (BYOK) */}
             <Card className="rounded-xl border bg-card p-5 shadow-none space-y-4">
               <CardHeader className="p-0 space-y-1">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="size-4 text-foreground" />
-                  <CardTitle className="text-sm font-bold font-display uppercase tracking-wider">
-                    How to Get Your API Key (Free)
-                  </CardTitle>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Key className="size-4 text-foreground" />
+                    <CardTitle className="text-sm font-bold font-display uppercase tracking-wider">
+                      Personal AI API Key (BYOK)
+                    </CardTitle>
+                  </div>
+                  <span
+                    className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded border ${
+                      hasPersonalAiKey
+                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                        : "bg-secondary text-muted-foreground border-border"
+                    }`}
+                  >
+                    {hasPersonalAiKey ? "Custom Key Active" : "Workspace Default"}
+                  </span>
                 </div>
                 <CardDescription className="text-xs text-muted-foreground">
-                  Google AI Studio Free Tier (1,500 requests per day)
+                  Optional encrypted BYOK key isolated to your workspace quota.
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-0 space-y-3 pt-2 text-xs">
-                <ol className="space-y-1.5 list-decimal list-inside text-muted-foreground font-sans leading-relaxed">
-                  <li>
-                    Visit{" "}
-                    <a
-                      href="https://aistudio.google.com/apikey"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-foreground font-bold underline inline-flex items-center gap-1"
-                    >
-                      aistudio.google.com/apikey
-                      <ExternalLink className="size-3" />
-                    </a>
-                  </li>
-                  <li>Sign in with your Google account.</li>
-                  <li>
-                    Click <strong>Create API Key</strong>.
-                  </li>
-                  <li>
-                    Add to your <code>.env.local</code>:
-                  </li>
-                </ol>
+                <div className="p-3 rounded-lg bg-secondary/40 border border-border/80 flex items-start gap-2.5">
+                  <ShieldCheck className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Your key is encrypted at rest with AES-256-GCM before storage and never exported in JSON backups or exposed back to client code.
+                  </p>
+                </div>
 
-                <pre className="p-3 rounded-lg bg-secondary/60 border border-border text-[11px] font-mono text-foreground overflow-x-auto select-all">
-                  GOOGLE_GENERATIVE_AI_API_KEY=AIzaSy...
-                </pre>
+                <div className="space-y-1.5">
+                  <label className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                    {hasPersonalAiKey ? "Replace Saved Key" : "Paste Personal AI Key"}
+                  </label>
+                  <Input
+                    type="password"
+                    value={personalKeyInput}
+                    onChange={(e) => setPersonalKeyInput(e.target.value)}
+                    placeholder={
+                      hasPersonalAiKey
+                        ? "•••••••••••••••• (leave blank to keep current)"
+                        : "Paste your AI API key here..."
+                    }
+                    className="h-9 font-mono text-xs"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 pt-1 flex-wrap">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={savingPersonalKey || personalKeyInput.trim().length < 12}
+                    onClick={() => handleSavePersonalKey(false)}
+                    className="h-8 text-xs font-mono gap-1.5"
+                  >
+                    {savingPersonalKey ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Key className="size-3" />
+                    )}
+                    <span>Save Key</span>
+                  </Button>
+                  {hasPersonalAiKey && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={savingPersonalKey}
+                      onClick={() => handleSavePersonalKey(true)}
+                      className="h-8 text-xs font-mono text-destructive hover:text-destructive gap-1.5"
+                    >
+                      <Trash2 className="size-3" />
+                      <span>Remove Key</span>
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -1060,8 +1157,56 @@ export function SettingsClient({
               </CardContent>
             </Card>
 
-            {/* Schema Info */}
+            {/* Restore / Import Backup Card */}
             <Card className="rounded-xl border bg-card p-5 shadow-none space-y-4">
+              <CardHeader className="p-0 space-y-1">
+                <div className="flex items-center gap-2">
+                  <Upload className="size-4 text-foreground" />
+                  <CardTitle className="text-sm font-bold font-display uppercase tracking-wider">
+                    Restore Backup (JSON)
+                  </CardTitle>
+                </div>
+                <CardDescription className="text-xs text-muted-foreground">
+                  Idempotent import of taxonomy, references, studio drafts, and snippets
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-0 space-y-3 pt-2 text-xs">
+                <p className="text-muted-foreground leading-relaxed">
+                  Upload a previously exported RMS v2 JSON backup. Duplicate URLs are safely skipped while missing taxonomies, references, drafts, and snippet templates are restored atomically.
+                </p>
+                <div className="pt-2 flex items-center gap-2 flex-wrap">
+                  <label className="inline-flex">
+                    <input
+                      type="file"
+                      accept="application/json,.json"
+                      disabled={importingBackup}
+                      onChange={handleBackupFileChange}
+                      className="sr-only"
+                    />
+                    <span
+                      className={`inline-flex items-center justify-center h-8 px-3 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground text-xs font-mono gap-1.5 cursor-pointer transition-colors ${
+                        importingBackup ? "opacity-50 pointer-events-none" : ""
+                      }`}
+                    >
+                      {importingBackup ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <Upload className="size-3" />
+                      )}
+                      <span>{importingBackup ? "Restoring..." : "Upload JSON Backup"}</span>
+                    </span>
+                  </label>
+                </div>
+                {importSummaryText && (
+                  <p className="text-[11px] font-mono text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-md p-2.5 leading-relaxed">
+                    {importSummaryText}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Schema Info */}
+            <Card className="rounded-xl border bg-card p-5 shadow-none space-y-4 md:col-span-2">
               <CardHeader className="p-0 space-y-1">
                 <div className="flex items-center gap-2">
                   <Database className="size-4 text-foreground" />

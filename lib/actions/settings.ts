@@ -21,9 +21,11 @@ import {
   contents,
   posts,
 } from "@/db/schema";
-import { getAppSettings } from "@/lib/queries/settings";
+import { getAppSettings, getUserAiKeyEncrypted } from "@/lib/queries/settings";
 import { invalidateReferenceMasterCache } from "@/lib/queries/references";
 import { getGoogleClient, runWithModelFallback } from "@/lib/ai/client";
+import { encryptSecret } from "@/lib/crypto";
+import { importBackupPayload, type BackupImportSummary } from "@/lib/backup/import";
 import { slugify } from "@/lib/domain/normalize";
 import { generateText } from "ai";
 
@@ -106,7 +108,7 @@ export async function updateGeneralSettings(
       })
       .where(eq(appSettings.userId, user.id));
 
-    revalidatePath("/");
+    revalidatePath("/home");
     revalidatePath("/settings");
     revalidatePath("/planner");
     revalidatePath("/insight");
@@ -148,7 +150,7 @@ export async function updateAiSettings(
       .set({
         aiEnabled: parsed.data.aiEnabled,
         aiProvider: parsed.data.aiProvider,
-        aiTextModel: parsed.data.aiTextModel?.trim() || "gemini-flash-lite-latest",
+        aiTextModel: parsed.data.aiTextModel?.trim() || "gemini-3.5-flash-lite",
         aiVisionModel: parsed.data.aiVisionModel?.trim() || null,
         aiDailyCap: parsed.data.aiDailyCap,
         aiOutputLanguage: parsed.data.aiOutputLanguage,
@@ -184,6 +186,51 @@ export async function updateAiSettings(
   }
 }
 
+export async function updatePersonalAiKey(input: {
+  apiKey: string | null;
+}): Promise<ActionResult<{ hasPersonalAiKey: boolean }>> {
+  const user = await requireActionOwner();
+  const trimmed = input.apiKey?.trim() || "";
+
+  if (trimmed.length > 0 && trimmed.length < 12) {
+    return fail("validation", "API key appears too short. Please paste a valid key.");
+  }
+
+  try {
+    const encrypted = trimmed ? encryptSecret(trimmed) : null;
+    await db
+      .update(appSettings)
+      .set({
+        aiApiKeyEnc: encrypted,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(appSettings.userId, user.id));
+
+    await db
+      .insert(systemLogs)
+      .values({
+        userId: user.id,
+        kind: "ai",
+        level: "info",
+        message: encrypted
+          ? "Personal BYOK AI API key configured"
+          : "Personal BYOK AI API key removed (reverted to workspace engine)",
+      })
+      .catch(() => {});
+
+    revalidatePath("/settings");
+    revalidatePath("/insight");
+    revalidatePath("/references");
+    revalidatePath("/inbox");
+    revalidatePath("/contents");
+
+    return ok({ hasPersonalAiKey: Boolean(encrypted) });
+  } catch (err) {
+    console.error("Failed updating personal AI key:", err);
+    return fail("internal", "Failed to save personal AI API key");
+  }
+}
+
 /**
  * Tests connection to the configured AI model (PRD §12.17 & §14.2).
  */
@@ -192,9 +239,10 @@ export async function testAiConnection(): Promise<
 > {
   const user = await requireActionOwner();
 
-  const google = getGoogleClient();
+  const personalKeyEnc = await getUserAiKeyEncrypted(user.id);
+  const google = getGoogleClient(personalKeyEnc);
   if (!google) {
-    return fail("ai_disabled", "No Gemini API key configured in .env.local or environment.");
+    return fail("ai_disabled", "AI Engine is not configured yet.");
   }
 
   const settings = await getAppSettings(user.id);
@@ -208,7 +256,8 @@ export async function testAiConnection(): Promise<
         });
         return { text: res.text.trim(), modelUsed: modelName };
       },
-      settings.aiTextModel
+      settings.aiTextModel,
+      personalKeyEnc
     );
 
     const latencyMs = Date.now() - start;
@@ -221,7 +270,7 @@ export async function testAiConnection(): Promise<
       meta: { response: text, model: modelUsed },
     });
 
-    return ok({ message: `Connected via ${modelUsed}`, latencyMs, model: modelUsed });
+    return ok({ message: "RMS AI Engine connected and ready", latencyMs, model: "rms-ai-engine" });
   } catch (err: unknown) {
     console.error("AI connection test failed:", err);
     return fail("ai_failed", "AI connection test failed. Check key validity and quota.");
@@ -253,7 +302,7 @@ function revalidateMasterConsumers(userId: string) {
   revalidatePath("/inbox/triage");
   revalidatePath("/contents");
   revalidatePath("/contents/new");
-  revalidatePath("/");
+  revalidatePath("/home");
 }
 
 /**
@@ -684,5 +733,32 @@ export async function reorderMasterItem(
   } catch (err) {
     console.error(`Error reordering master item ${tableType}:`, err);
     return fail("internal", "Failed to reorder master item");
+  }
+}
+
+export async function importWorkspaceBackup(input: {
+  jsonText: string;
+}): Promise<ActionResult<BackupImportSummary>> {
+  const user = await requireActionOwner();
+
+  const raw = input.jsonText?.trim() || "";
+  if (!raw) {
+    return fail("validation", "Backup file is empty.");
+  }
+
+  if (raw.length > 12 * 1024 * 1024) {
+    return fail("validation", "Backup file exceeds 12MB safety limit.");
+  }
+
+  try {
+    const summary = await importBackupPayload(user.id, raw);
+    revalidateMasterConsumers(user.id);
+    revalidatePath("/planner");
+    revalidatePath("/evaluate");
+    revalidatePath("/insight");
+    return ok(summary);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to import JSON backup";
+    return fail("validation", msg);
   }
 }

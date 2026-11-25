@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "RMS",
     short_name: "RMS",
-    description: "Reference Management & Content Studio.",
+    description: "Reference Management System.",
     start_url: "/",
     display: "standalone",
     background_color: "#FFFFFF",

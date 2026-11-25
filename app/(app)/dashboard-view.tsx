@@ -182,7 +182,7 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
                   Inbox Triage
                 </div>
                 <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
-                  Raw saved links waiting for review & bedah
+                  Raw saved links waiting for review &amp; breakdown
                 </p>
               </div>
             </div>

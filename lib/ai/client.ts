@@ -1,28 +1,43 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { decryptSecret } from "@/lib/crypto";
 
-export function getGoogleClient() {
-  const apiKey =
+function resolveApiKey(customEncryptedKey?: string | null): string | null {
+  if (customEncryptedKey) {
+    const decrypted = decryptSecret(customEncryptedKey);
+    if (decrypted && decrypted.trim() && !decrypted.includes("your-")) {
+      return decrypted.trim();
+    }
+  }
+
+  const serverKey =
     process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
     process.env.GEMINI_API_KEY ||
     "";
 
-  if (!apiKey || apiKey.trim() === "" || apiKey.includes("your-")) {
+  if (!serverKey || serverKey.trim() === "" || serverKey.includes("your-")) {
     return null;
   }
 
+  return serverKey.trim();
+}
+
+export function getGoogleClient(customEncryptedKey?: string | null) {
+  const apiKey = resolveApiKey(customEncryptedKey);
+  if (!apiKey) return null;
+
   return createGoogleGenerativeAI({
-    apiKey: apiKey.trim(),
+    apiKey,
   });
 }
 
-// Resilient priority order of models available in Google AI Studio
+// Resilient priority order of models available in AI Engine
 export const DEFAULT_CANDIDATE_MODELS = [
   process.env.AI_TEXT_MODEL,
+  "gemini-3.5-flash-lite",
+  "gemini-3.6-flash",
   "gemini-flash-lite-latest",
+  "gemini-3.7-flash",
   "gemini-3.8-flash",
-  "gemini-flash-latest",
-  "gemini-3.5-flash",
-  "gemini-pro-latest",
 ].filter(Boolean) as string[];
 
 export function buildCandidateModels(preferredModel?: string | null): string[] {
@@ -33,8 +48,8 @@ export function buildCandidateModels(preferredModel?: string | null): string[] {
   return Array.from(new Set(list));
 }
 
-export function getGeminiModel(modelName?: string) {
-  const google = getGoogleClient();
+export function getGeminiModel(modelName?: string, customEncryptedKey?: string | null) {
+  const google = getGoogleClient(customEncryptedKey);
   if (!google) return null;
   return google(modelName || DEFAULT_CANDIDATE_MODELS[0]);
 }
@@ -47,11 +62,12 @@ export async function runWithModelFallback<T>(
     model: ReturnType<NonNullable<ReturnType<typeof getGoogleClient>>>,
     modelName: string
   ) => Promise<T>,
-  preferredModel?: string | null
+  preferredModel?: string | null,
+  customEncryptedKey?: string | null
 ): Promise<T> {
-  const google = getGoogleClient();
+  const google = getGoogleClient(customEncryptedKey);
   if (!google) {
-    throw new Error("Google Gemini API client is not configured.");
+    throw new Error("AI Engine client is not configured.");
   }
 
   const candidates = buildCandidateModels(preferredModel);

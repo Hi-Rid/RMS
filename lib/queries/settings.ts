@@ -38,6 +38,7 @@ export interface AppSettingsQuery {
   creatorNiche: string | null;
   creatorAudience: string | null;
   creatorVoice: string | null;
+  hasPersonalAiKey: boolean;
   aiUsedToday: number;
 }
 
@@ -50,7 +51,7 @@ const DEFAULT_SETTINGS_RETURN: AppSettingsQuery = {
   defaultChecklist: DEFAULT_CHECKLIST,
   aiEnabled: true,
   aiProvider: "google",
-  aiTextModel: "gemini-flash-lite-latest",
+  aiTextModel: "gemini-3.5-flash-lite",
   aiVisionModel: null,
   aiEmbedModel: null,
   aiDailyCap: 100,
@@ -60,6 +61,7 @@ const DEFAULT_SETTINGS_RETURN: AppSettingsQuery = {
   creatorNiche: null,
   creatorAudience: null,
   creatorVoice: null,
+  hasPersonalAiKey: false,
   aiUsedToday: 0,
 };
 
@@ -95,7 +97,7 @@ export async function getAppSettings(explicitUserId?: string): Promise<AppSettin
           : DEFAULT_CHECKLIST,
       aiEnabled: settings?.aiEnabled ?? true,
       aiProvider: settings?.aiProvider ?? "google",
-      aiTextModel: settings?.aiTextModel ?? "gemini-flash-lite-latest",
+      aiTextModel: settings?.aiTextModel ?? "gemini-3.5-flash-lite",
       aiVisionModel: settings?.aiVisionModel ?? null,
       aiEmbedModel: settings?.aiEmbedModel ?? null,
       aiDailyCap: settings?.aiDailyCap ?? 100,
@@ -106,11 +108,28 @@ export async function getAppSettings(explicitUserId?: string): Promise<AppSettin
       creatorNiche: settings?.creatorNiche ?? null,
       creatorAudience: settings?.creatorAudience ?? null,
       creatorVoice: settings?.creatorVoice ?? null,
+      hasPersonalAiKey: Boolean(settings?.aiApiKeyEnc),
       aiUsedToday: Number(usageTodayRes?.count) || 0,
     };
   } catch (err) {
     console.warn("Failed to fetch app settings, using defaults:", err);
     return DEFAULT_SETTINGS_RETURN;
+  }
+}
+
+/**
+ * Fetches the encrypted per-user AI key strictly on the server (never serialized to client props).
+ */
+export async function getUserAiKeyEncrypted(userId: string): Promise<string | null> {
+  try {
+    const [row] = await db
+      .select({ aiApiKeyEnc: appSettings.aiApiKeyEnc })
+      .from(appSettings)
+      .where(eq(appSettings.userId, userId))
+      .limit(1);
+    return row?.aiApiKeyEnc ?? null;
+  } catch {
+    return null;
   }
 }
 

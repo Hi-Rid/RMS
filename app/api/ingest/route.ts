@@ -171,7 +171,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      revalidatePath("/");
+      revalidatePath("/home");
       revalidatePath("/inbox");
       revalidatePath("/references");
       revalidatePath("/contents");
@@ -241,7 +241,7 @@ export async function POST(request: NextRequest) {
       });
 
       let agentRes = null;
-      if (!record.isDuplicate && enrichedBatchCount < 5) {
+      if (!record.isDuplicate && enrichedBatchCount < 2) {
         enrichedBatchCount++;
         agentRes = await runAiAgentForReference({
           userId,

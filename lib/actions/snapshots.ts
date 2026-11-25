@@ -97,7 +97,7 @@ export async function saveSnapshotMetrics(
     // 3. Recompute content status (advances content and linked refs to "evaluating")
     await recomputeContent(tx, snap.contentId);
 
-    revalidatePath("/");
+    revalidatePath("/home");
     revalidatePath("/evaluate");
     revalidatePath(`/contents/${snap.contentId}`);
     revalidatePath("/references");
@@ -148,7 +148,7 @@ export async function skipSnapshot(
 
     await recomputeContent(tx, snap.contentId);
 
-    revalidatePath("/");
+    revalidatePath("/home");
     revalidatePath("/evaluate");
     revalidatePath(`/contents/${snap.contentId}`);
 

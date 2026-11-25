@@ -101,9 +101,9 @@ export function TriageFlow({ initialItems, masterData }: TriageFlowProps) {
       if (res.data.suggestedTags?.length) {
         setTags(res.data.suggestedTags);
       }
-      toast.success("AI Bedah selesai! Fields sudah terisi.");
+      toast.success("AI breakdown complete! Fields populated.");
     } catch {
-      toast.error("Failed to run AI Bedah");
+      toast.error("Failed to run AI Breakdown");
     } finally {
       setIsAiLoading(false);
     }
@@ -295,14 +295,14 @@ export function TriageFlow({ initialItems, masterData }: TriageFlowProps) {
           </div>
         </div>
 
-        {/* Right: AI Bedah + Metadata Capture + Quick Actions */}
+        {/* Right: AI Breakdown + Metadata Capture + Quick Actions */}
         <div className="lg:col-span-7 bg-card border border-border rounded-lg p-6 space-y-5">
-          {/* AI Auto-Bedah Quick Trigger */}
+          {/* AI Auto-Breakdown Quick Trigger */}
           <div className="p-3.5 rounded-lg border border-border bg-secondary/40 flex items-center justify-between gap-3 flex-wrap">
             <div className="space-y-0.5">
               <div className="font-bold text-foreground font-display flex items-center gap-1.5 text-xs">
                 <Sparkles className="size-3.5 text-amber-500 fill-amber-500" />
-                <span>AI Auto-Bedah (Gemini)</span>
+                <span>AI Auto-Breakdown</span>
               </div>
               <p className="text-[11px] font-mono text-muted-foreground">
                 Extract opening hook, hook archetype, and adaptation ideas before triaging
@@ -320,7 +320,7 @@ export function TriageFlow({ initialItems, masterData }: TriageFlowProps) {
               ) : (
                 <Sparkles className="size-3.5" />
               )}
-              <span>Run Auto-Bedah</span>
+              <span>Run Breakdown</span>
             </Button>
           </div>
 

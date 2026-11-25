@@ -21,7 +21,7 @@ import { registerWithPassword } from "@/lib/actions/auth";
 
 function RegisterForm() {
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
+  const next = searchParams.get("next") || "/home";
 
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -32,7 +32,7 @@ function RegisterForm() {
   const [verificationSentTo, setVerificationSentTo] = React.useState<string | null>(null);
 
   const safeRedirectTarget =
-    next.startsWith("/") && !next.startsWith("//") ? next : "/";
+    next.startsWith("/") && !next.startsWith("//") ? next : "/home";
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -217,7 +217,7 @@ function RegisterForm() {
               <div className="pt-3 border-t border-border/60 text-center text-xs font-mono text-muted-foreground">
                 Already have an account?{" "}
                 <Link
-                  href={next && next !== "/" ? `/login?next=${encodeURIComponent(next)}` : "/login"}
+                  href={next && next !== "/home" && next !== "/" ? `/login?next=${encodeURIComponent(next)}` : "/login"}
                   className="text-foreground font-semibold underline underline-offset-4 hover:opacity-80"
                 >
                   Sign in

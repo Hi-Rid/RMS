@@ -2,11 +2,13 @@
 
 import { z } from "zod";
 import { generateText, Output } from "ai";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { aiUsage } from "@/db/schema";
+import { aiUsage, refs } from "@/db/schema";
 import { buildCreatorPersonaPrompt } from "@/lib/ai/agent";
 import { getGoogleClient, runWithModelFallback } from "@/lib/ai/client";
-import { getAppSettings } from "@/lib/queries/settings";
+import { resolveAndMirrorThumbnail } from "@/lib/storage/thumbnails";
+import { getAppSettings, getUserAiKeyEncrypted } from "@/lib/queries/settings";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
 
@@ -15,6 +17,7 @@ type AiFeature = "bedah" | "hooks" | "script" | "insight" | "caption";
 async function executeWithAiGuard<T>(
   feature: AiFeature,
   runner: (ctx: {
+    userId: string;
     model: ReturnType<NonNullable<ReturnType<typeof getGoogleClient>>>;
     langInstruction: string;
   }) => Promise<{ data: T; inputTokens?: number; outputTokens?: number }>
@@ -29,11 +32,12 @@ async function executeWithAiGuard<T>(
     );
   }
 
-  const google = getGoogleClient();
+  const personalKeyEnc = await getUserAiKeyEncrypted(user.id);
+  const google = getGoogleClient(personalKeyEnc);
   if (!google) {
     return fail(
       "ai_disabled",
-      "Google Gemini API key is not configured. Add GOOGLE_GENERATIVE_AI_API_KEY in .env.local."
+      "AI Engine is not configured yet. Add a Personal AI API Key in Settings or check your environment configuration."
     );
   }
 
@@ -69,10 +73,14 @@ async function executeWithAiGuard<T>(
   let usedModel = settings.aiTextModel || "gemini-flash-lite-latest";
 
   try {
-    const result = await runWithModelFallback(async (model, modelName) => {
-      usedModel = modelName;
-      return await runner({ model, langInstruction });
-    }, settings.aiTextModel);
+    const result = await runWithModelFallback(
+      async (model, modelName) => {
+        usedModel = modelName;
+        return await runner({ userId: user.id, model, langInstruction });
+      },
+      settings.aiTextModel,
+      personalKeyEnc
+    );
 
     const latencyMs = Date.now() - start;
     await db
@@ -112,8 +120,8 @@ async function executeWithAiGuard<T>(
     return fail(
       isRateLimit ? "rate_limited" : "ai_failed",
       isRateLimit
-        ? "AI provider rate limit hit. Please try again in a moment."
-        : "Failed to process AI request. Check your Gemini API key or quota."
+        ? "AI engine rate limit hit. Please try again in a moment."
+        : "Failed to process AI request. Please check your AI quota or try again."
     );
   }
 }
@@ -128,6 +136,7 @@ export interface BedahResult {
 }
 
 const bedahSchema = z.object({
+  refId: z.string().uuid().optional(),
   text: z.string().min(1, "Text or URL description is required"),
   platform: z.string().optional(),
 });
@@ -143,33 +152,73 @@ export async function aiBedahReference(
     return fail("validation", parsed.error.issues[0]?.message || "Invalid input");
   }
 
-  return executeWithAiGuard("bedah", async ({ model, langInstruction }) => {
-    const res = await generateText({
-      model,
-      output: Output.object({
-        schema: z.object({
-          hookText: z.string().describe("Opening 3-second hook that captures viewer attention"),
-          hookType: z
-            .string()
-            .describe("Hook archetype (e.g. POV, Curiosity gap, Bold statement, Stop doing this, Question)"),
-          visualNotes: z.string().describe("Visual styling, framing, transitions, pacing, or B-roll cues"),
-          keyTakeaway: z.string().describe("Core psychological reason why this content succeeded"),
-          adaptIdeas: z
-            .array(z.string())
-            .min(3)
-            .max(4)
-            .describe("3 original adaptation ideas distinct from the source"),
-          suggestedTags: z.array(z.string()).min(2).max(5).describe("Relevant topic category tags"),
-        }),
-      }),
-      prompt: `You are an expert short-form video content strategist and hook breakdown specialist (Reels, Shorts, TikTok).
-Perform an in-depth breakdown of this reference content:
-Platform: ${parsed.data.platform || "Social Media"}
-Content/URL: "${parsed.data.text}"
+  return executeWithAiGuard("bedah", async ({ userId, model, langInstruction }) => {
+    let imagePart: { type: "file"; data: Uint8Array; mediaType: string } | null = null;
+    if (parsed.data.refId) {
+      const [refRow] = await db
+        .select({ id: refs.id, coverUrl: refs.coverUrl })
+        .from(refs)
+        .where(and(eq(refs.id, parsed.data.refId), eq(refs.userId, userId)))
+        .limit(1);
 
-${langInstruction}
-Focus on originality and practical ways to adapt the concept without copying.`,
+      if (refRow?.coverUrl) {
+        const thumb = await resolveAndMirrorThumbnail({
+          userId,
+          refId: refRow.id,
+          sourceUrl: refRow.coverUrl,
+        });
+        if (thumb.imageBuffer && thumb.mimeType) {
+          imagePart = {
+            type: "file",
+            data: thumb.imageBuffer,
+            mediaType: thumb.mimeType,
+          };
+        }
+      }
+    }
+
+    const breakdownPrompt = `You are an expert short-form video content strategist and hook breakdown specialist (Reels, Shorts, TikTok).
+Perform a factual, grounded breakdown of this reference content:
+Platform: ${parsed.data.platform || "Social Media"}
+Content/Context: "${parsed.data.text}"
+
+RULES:
+- NEVER write generic clickbait like "Hal yang tidak disangka-sangka..." or fluffy filler like "komposisi yang bersih memanjakan mata".
+- Describe concrete opening framing, camera transitions, props, subject/wardrobe details, and psychological retention mechanics.
+- Provide 3 distinct, actionable adaptation ideas and specific searchable tags (no platform names like instagram/reel/video).
+- ${langInstruction}`;
+
+    const schema = z.object({
+      hookText: z.string().describe("Concrete 3-second opening hook (spoken/text or factual [Visual Hook] framing)"),
+      hookType: z
+        .string()
+        .describe("Hook archetype (e.g. POV, Curiosity gap, Bold statement, Reveal / transformation)"),
+      visualNotes: z.string().describe("Shot-by-shot visual styling, framing, camera motion, pacing, or B-roll cues"),
+      keyTakeaway: z.string().describe("Concrete reason this structure retains viewers + how to replicate it"),
+      adaptIdeas: z
+        .array(z.string())
+        .min(3)
+        .max(4)
+        .describe("3 original adaptation ideas distinct from the source"),
+      suggestedTags: z.array(z.string()).min(3).max(6).describe("Specific searchable topic/camera/style tags"),
     });
+
+    const res = imagePart
+      ? await generateText({
+          model,
+          output: Output.object({ schema }),
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: breakdownPrompt }, imagePart],
+            },
+          ],
+        })
+      : await generateText({
+          model,
+          output: Output.object({ schema }),
+          prompt: breakdownPrompt,
+        });
 
     return {
       data: res.output,

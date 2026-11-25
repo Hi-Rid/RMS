@@ -8,8 +8,10 @@ export interface SocialMetadata {
   authorName: string | null;
   authorHandle: string | null;
   coverUrl: string | null;
+  videoUrl: string | null;
   audioTitle: string | null;
   audioArtist: string | null;
+  accessibilityCaption: string | null;
   hashtags: string[];
   sharedText: string | null;
   provider: string;
@@ -102,7 +104,7 @@ function safeHttpUrl(value: string | null | undefined): string | null {
   if (!value) return null;
   const trimmed = value.trim();
   if (/^https?:\/\/\S+/i.test(trimmed)) {
-    return trimmed.slice(0, 1000);
+    return trimmed.slice(0, 4000);
   }
   return null;
 }
@@ -420,21 +422,182 @@ async function fetchMicrolink(url: string): Promise<{
   }
 }
 
-async function fetchOpenGraphHtml(url: string): Promise<{
+interface ExtractedHydratedMedia {
+  caption: string | null;
+  authorName: string | null;
+  authorHandle: string | null;
+  coverUrl: string | null;
+  videoUrl: string | null;
+  audioTitle: string | null;
+  audioArtist: string | null;
+  accessibilityCaption: string | null;
+}
+
+function findInstagramMediaNode(
+  node: unknown,
+  targetCode?: string | null,
+  depth = 0
+): Record<string, any> | null {
+  if (!node || typeof node !== "object" || depth > 25) return null;
+
+  if (Array.isArray(node)) {
+    let fallback: Record<string, any> | null = null;
+    for (const item of node) {
+      const found = findInstagramMediaNode(item, targetCode, depth + 1);
+      if (found) {
+        if (found.video_versions || found.clips_metadata) return found;
+        fallback = fallback ?? found;
+      }
+    }
+    return fallback;
+  }
+
+  const obj = node as Record<string, any>;
+  const matchesCode = !targetCode || obj.code === targetCode;
+  if (
+    matchesCode &&
+    (Array.isArray(obj.video_versions) ||
+      obj.clips_metadata ||
+      obj.image_versions2 ||
+      obj.__isXIGPolarisMedia)
+  ) {
+    return obj;
+  }
+
+  let fallback: Record<string, any> | null = null;
+  for (const val of Object.values(obj)) {
+    if (val && typeof val === "object") {
+      const found = findInstagramMediaNode(val, targetCode, depth + 1);
+      if (found) {
+        if (found.video_versions || found.clips_metadata) return found;
+        fallback = fallback ?? found;
+      }
+    }
+  }
+  return fallback;
+}
+
+export function extractInstagramHydratedMedia(
+  html: string,
+  targetShortcode?: string | null
+): ExtractedHydratedMedia | null {
+  if (!html) return null;
+  const scriptRegex =
+    /<script[^>]+type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match: RegExpExecArray | null;
+  let bestNode: Record<string, any> | null = null;
+
+  while ((match = scriptRegex.exec(html)) !== null) {
+    const body = match[1];
+    if (!body || body.length < 100) continue;
+    if (targetShortcode && !body.includes(targetShortcode)) continue;
+    if (
+      !body.includes("video_versions") &&
+      !body.includes("clips_metadata") &&
+      !body.includes("XIGPolaris")
+    ) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(body);
+      const node = findInstagramMediaNode(parsed, targetShortcode);
+      if (
+        node &&
+        (!bestNode || ((node.video_versions || node.clips_metadata) && !bestNode.video_versions))
+      ) {
+        bestNode = node;
+      }
+    } catch {
+      // Ignore unparseable script blocks
+    }
+  }
+
+  if (!bestNode) return null;
+
+  const musicAsset = bestNode.clips_metadata?.music_info?.music_asset_info;
+  const originalSound = bestNode.clips_metadata?.original_sound_info;
+
+  const audioTitle =
+    cleanText(musicAsset?.title, 200) ??
+    cleanText(originalSound?.original_audio_title, 200) ??
+    null;
+  const audioArtist =
+    cleanText(musicAsset?.display_artist, 200) ??
+    cleanText(originalSound?.ig_artist?.username, 120) ??
+    null;
+
+  const videoCandidate = Array.isArray(bestNode.video_versions)
+    ? bestNode.video_versions[0]?.url
+    : null;
+  const imageCandidate =
+    (Array.isArray(bestNode.image_versions2?.candidates)
+      ? bestNode.image_versions2.candidates[0]?.url
+      : null) ?? bestNode.display_uri;
+
+  return {
+    caption: cleanText(bestNode.caption?.text, 1200),
+    authorName: cleanText(bestNode.user?.full_name, 120),
+    authorHandle: normalizeSocialHandle(bestNode.user?.username),
+    coverUrl: safeHttpUrl(imageCandidate),
+    videoUrl: safeHttpUrl(videoCandidate),
+    audioTitle,
+    audioArtist,
+    accessibilityCaption: cleanText(bestNode.accessibility_caption, 400),
+  };
+}
+
+export function extractTikTokHydratedMedia(html: string): ExtractedHydratedMedia | null {
+  if (!html) return null;
+  const match = html.match(
+    /<script[^>]+id=["']__UNIVERSAL_DATA_FOR_REHYDRATION__["'][^>]*>([\s\S]*?)<\/script>/i
+  );
+  if (!match?.[1]) return null;
+
+  try {
+    const parsed = JSON.parse(match[1]);
+    const item =
+      parsed?.__DEFAULT_SCOPE__?.["webapp.video-detail"]?.itemInfo?.itemStruct;
+    if (!item || typeof item !== "object") return null;
+
+    return {
+      caption: cleanText(item.desc, 1200),
+      authorName: cleanText(item.author?.nickname, 120),
+      authorHandle: normalizeSocialHandle(item.author?.uniqueId),
+      coverUrl: safeHttpUrl(item.video?.cover ?? item.video?.originCover),
+      videoUrl: safeHttpUrl(item.video?.playAddr ?? item.video?.downloadAddr),
+      audioTitle: cleanText(item.music?.title, 200),
+      audioArtist: cleanText(item.music?.authorName, 200),
+      accessibilityCaption: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchOpenGraphHtml(
+  url: string,
+  options?: { platform?: Platform; externalId?: string | null }
+): Promise<{
   title: string | null;
   description: string | null;
   authorName: string | null;
   image: string | null;
+  hydrated: ExtractedHydratedMedia | null;
   provider: string;
 } | null> {
   try {
+    const isSocialRich =
+      options?.platform === "instagram" || options?.platform === "tiktok";
     const res = await fetch(url, {
-      signal: AbortSignal.timeout(3500),
+      signal: AbortSignal.timeout(6000),
       cache: "no-store",
       redirect: "follow",
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+          options?.platform === "tiktok"
+            ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            : "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
         Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9,id;q=0.8",
       },
@@ -444,16 +607,24 @@ async function fetchOpenGraphHtml(url: string): Promise<{
     if (!contentType.includes("text/html") && !contentType.includes("xhtml")) {
       return null;
     }
-    const html = (await res.text()).slice(0, 160_000);
+    const html = (await res.text()).slice(0, isSocialRich ? 1_200_000 : 250_000);
     const og = parseOpenGraphMeta(html);
+    const hydrated =
+      options?.platform === "instagram"
+        ? extractInstagramHydratedMedia(html, options?.externalId)
+        : options?.platform === "tiktok"
+          ? extractTikTokHydratedMedia(html)
+          : null;
+
     const informativeTitle = isInformativeTitle(og.title) ? og.title : null;
-    if (!informativeTitle && !og.description && !og.image) return null;
+    if (!informativeTitle && !og.description && !og.image && !hydrated) return null;
     return {
       title: informativeTitle,
       description: og.description,
       authorName: og.author,
       image: og.image,
-      provider: "opengraph",
+      hydrated,
+      provider: hydrated ? `${options?.platform}-hydrated` : "opengraph",
     };
   } catch {
     return null;
@@ -473,10 +644,33 @@ export async function fetchSocialMetadata(input: {
   let authorName: string | null = null;
   let authorHandle: string | null = normalizeSocialHandle(input.urlHandle);
   let coverUrl: string | null = null;
+  let videoUrl: string | null = null;
+  let hydratedAudioTitle: string | null = null;
+  let hydratedAudioArtist: string | null = null;
+  let accessibilityCaption: string | null = null;
   let provider = sharedText ? "share-text" : "none";
 
+  const applyHydrated = (h: ExtractedHydratedMedia | null | undefined) => {
+    if (!h) return;
+    if (h.caption) {
+      description = h.caption;
+      if (!title) title = cleanText(h.caption, 280);
+    }
+    authorName = authorName ?? h.authorName;
+    authorHandle = authorHandle ?? h.authorHandle;
+    coverUrl = h.coverUrl ?? coverUrl;
+    videoUrl = h.videoUrl ?? videoUrl;
+    hydratedAudioTitle = hydratedAudioTitle ?? h.audioTitle;
+    hydratedAudioArtist = hydratedAudioArtist ?? h.audioArtist;
+    accessibilityCaption = accessibilityCaption ?? h.accessibilityCaption;
+  };
+
   if (input.platform === "tiktok") {
-    const oembed = await fetchTikTokOembed(input.url);
+    const [oembed, og, micro] = await Promise.all([
+      fetchTikTokOembed(input.url),
+      fetchOpenGraphHtml(input.url, { platform: "tiktok", externalId: input.externalId }),
+      fetchMicrolink(input.url),
+    ]);
     if (oembed) {
       title = isInformativeTitle(oembed.title) ? oembed.title : null;
       authorName = oembed.authorName;
@@ -485,19 +679,19 @@ export async function fetchSocialMetadata(input: {
       coverUrl = oembed.thumbnailUrl;
       provider = oembed.provider;
     }
-    if (!title && !coverUrl) {
-      const [og, micro] = await Promise.all([
-        fetchOpenGraphHtml(input.url),
-        fetchMicrolink(input.url),
-      ]);
-      const best = og ?? micro;
-      if (best) {
-        title = title ?? best.title;
-        description = description ?? best.description;
-        authorName = authorName ?? best.authorName;
-        coverUrl = coverUrl ?? best.image;
-        provider = best.provider;
-      }
+    if (og) {
+      title = title ?? og.title;
+      description = description ?? og.description;
+      authorName = authorName ?? og.authorName;
+      coverUrl = coverUrl ?? og.image;
+      applyHydrated(og.hydrated);
+      if (og.hydrated) provider = og.provider;
+    }
+    if (micro && (!title || !coverUrl)) {
+      title = title ?? micro.title;
+      description = description ?? micro.description;
+      authorName = authorName ?? micro.authorName;
+      coverUrl = coverUrl ?? micro.image;
     }
   } else if (input.platform === "youtube") {
     const oembed = await fetchYouTubeOembed(input.url);
@@ -513,15 +707,18 @@ export async function fetchSocialMetadata(input: {
       coverUrl = `https://i.ytimg.com/vi/${input.externalId}/hqdefault.jpg`;
     }
   } else {
-    const [og, micro] = await Promise.all([
-      fetchOpenGraphHtml(input.url),
-      fetchMicrolink(input.url),
-    ]);
+    const og = await fetchOpenGraphHtml(input.url, {
+      platform: input.platform,
+      externalId: input.externalId,
+    });
+    const micro =
+      !og?.hydrated || !og?.image ? await fetchMicrolink(input.url) : null;
     title = og?.title ?? micro?.title ?? null;
     description = og?.description ?? micro?.description ?? null;
     authorName = og?.authorName ?? micro?.authorName ?? null;
     coverUrl = og?.image ?? micro?.image ?? null;
-    provider = og?.provider ?? micro?.provider ?? provider;
+    applyHydrated(og?.hydrated);
+    provider = og?.hydrated ? og.provider : og?.provider ?? micro?.provider ?? provider;
   }
 
   const parsedTitleInfo = extractInstagramOrAuthorFromTitle(title, input.platform);
@@ -537,7 +734,7 @@ export async function fetchSocialMetadata(input: {
 
   const combinedText = [title, description, sharedText].filter(Boolean).join("\n");
   const hashtags = extractHashtagsFromText(combinedText);
-  const { audioTitle, audioArtist } = parseAudioFromText(combinedText);
+  const parsedAudio = parseAudioFromText(combinedText);
 
   return {
     url: input.url,
@@ -547,8 +744,10 @@ export async function fetchSocialMetadata(input: {
     authorName,
     authorHandle,
     coverUrl,
-    audioTitle,
-    audioArtist,
+    videoUrl,
+    audioTitle: hydratedAudioTitle ?? parsedAudio.audioTitle,
+    audioArtist: hydratedAudioArtist ?? parsedAudio.audioArtist,
+    accessibilityCaption,
     hashtags,
     sharedText,
     provider,

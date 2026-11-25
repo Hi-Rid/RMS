@@ -101,7 +101,7 @@ export function CommandPalette({
         <CommandSeparator />
 
         <CommandGroup heading="Navigation">
-          <CommandItem onSelect={() => runCommand(() => router.push("/"))}>
+          <CommandItem onSelect={() => runCommand(() => router.push("/home"))}>
             <Home />
             <span>Home</span>
           </CommandItem>

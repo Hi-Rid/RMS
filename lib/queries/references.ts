@@ -15,6 +15,13 @@ import {
   refImages,
 } from "@/db/schema";
 import type { Platform, ContentFormatGuess } from "@/lib/domain/url";
+import {
+  findSemanticReferenceIds,
+  findSimilarReferences,
+  type SimilarReferenceItem,
+} from "@/lib/ai/embeddings";
+
+export type { SimilarReferenceItem };
 
 // Per-user memory cache for platform and format lookups
 const cachedPlatformsByUser = new Map<string, Map<string, string>>();
@@ -384,16 +391,21 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
     }
 
     if (searchText && searchText.trim()) {
-      const term = `%${searchText.trim().toLowerCase()}%`;
-      conditions.push(
-        or(
-          sql`lower(${refs.url}) LIKE ${term}`,
-          sql`lower(${refs.hookText}) LIKE ${term}`,
-          sql`lower(${refs.summary}) LIKE ${term}`,
-          sql`lower(${refs.notes}) LIKE ${term}`,
-          sql`${refs.searchText} LIKE ${term}`
-        )!
-      );
+      const trimmed = searchText.trim();
+      const term = `%${trimmed.toLowerCase()}%`;
+      const semanticIds = await findSemanticReferenceIds(userId, trimmed);
+      const textCondition = or(
+        sql`lower(${refs.url}) LIKE ${term}`,
+        sql`lower(${refs.hookText}) LIKE ${term}`,
+        sql`lower(${refs.summary}) LIKE ${term}`,
+        sql`lower(${refs.notes}) LIKE ${term}`,
+        sql`${refs.searchText} LIKE ${term}`
+      )!;
+      if (semanticIds.length > 0) {
+        conditions.push(or(textCondition, inArray(refs.id, semanticIds))!);
+      } else {
+        conditions.push(textCondition);
+      }
     }
 
     if (platformSlug && platformSlug !== "all") {
@@ -652,4 +664,13 @@ export async function getReferenceById(
     console.warn(`Failed to get reference by ID ${id} (database fallback):`, error);
     return null;
   }
+}
+
+export async function getSimilarReferences(
+  refId: string,
+  limit = 4
+): Promise<SimilarReferenceItem[]> {
+  const owner = await getOwner();
+  if (!owner) return [];
+  return findSimilarReferences(owner.id, refId, limit);
 }

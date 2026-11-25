@@ -24,7 +24,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
 
   const hasGeminiKey = Boolean(
     process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
-    process.env.GEMINI_API_KEY
+      process.env.GEMINI_API_KEY ||
+      settings.hasPersonalAiKey
   );
 
   const appUrl = env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") || "http://localhost:3000";

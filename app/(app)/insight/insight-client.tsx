@@ -66,7 +66,7 @@ export function InsightClient({ initialData, hasGeminiKey }: InsightClientProps)
     }
 
     if (!hasGeminiKey) {
-      toast.error("Google Gemini API key required. Please configure it in Settings.");
+      toast.error("AI Engine is not ready yet. Check AI settings or environment configuration.");
       return;
     }
 

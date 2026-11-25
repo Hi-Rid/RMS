@@ -76,9 +76,9 @@ export function CaptureSheet({
       if (res.data.suggestedTags?.length) {
         setTagsInput(res.data.suggestedTags.join(", "));
       }
-      toast.success("AI Bedah complete! Extracted hook & adaptation ideas.");
+      toast.success("AI breakdown complete! Extracted hook & adaptation ideas.");
     } catch {
-      toast.error("Failed to run AI Bedah");
+      toast.error("Failed to run AI Breakdown");
     } finally {
       setIsAiLoading(false);
     }
@@ -162,12 +162,12 @@ export function CaptureSheet({
         </SheetHeader>
 
         <div className="space-y-5 text-xs">
-          {/* AI Bedah Quick Button */}
+          {/* AI Breakdown Quick Button */}
           <div className="p-3 rounded-lg border border-border bg-secondary/40 flex items-center justify-between gap-3">
             <div className="space-y-0.5">
               <span className="font-bold text-foreground font-display flex items-center gap-1.5 text-xs">
                 <Sparkles className="size-3.5 text-amber-500 fill-amber-500" />
-                <span>AI Auto-Breakdown (Gemini)</span>
+                <span>AI Auto-Breakdown</span>
               </span>
               <p className="text-[11px] font-mono text-muted-foreground">
                 Extract hook, visual breakdown & adaptation ideas automatically
