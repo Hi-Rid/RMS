@@ -97,12 +97,13 @@ export async function GET() {
       },
     };
 
-    // Audit log
+    // Audit log (respects system_logs_kind_check constraint)
     await db.insert(systemLogs).values({
-      kind: "export",
+      kind: "import",
       level: "info",
       message: `Database backup exported by owner (${dateStr})`,
       meta: {
+        operation: "export",
         tables_count: Object.keys(exportPayload.tables).length,
         refs_count: sanitizedRefs.length,
         contents_count: contentsData.length,

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import { db, withTx } from "@/lib/db";
-import { posts, snapshots } from "@/db/schema";
+import { posts, snapshots, contents, formats } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
 import { recomputeContent } from "@/lib/domain/status";
@@ -19,11 +19,11 @@ const addPostSchema = z.object({
 });
 
 /**
- * Adds a published post to content and creates the 3 checkpoint snapshots (PRD §10.5).
+ * Adds a published post to content and creates the 3 checkpoint snapshots if the content format hasCheckpoints (PRD §10.5).
  */
 export async function addPost(
   input: z.infer<typeof addPostSchema>
-): Promise<ActionResult<{ id: string }>> {
+): Promise<ActionResult<{ id: string; checkpointsCreated: number }>> {
   await requireActionOwner();
 
   const parsed = addPostSchema.safeParse(input);
@@ -46,7 +46,17 @@ export async function addPost(
       return fail("conflict", "A post for this platform already exists on this content");
     }
 
-    // 2. Insert post
+    // 2. Determine whether content format uses checkpoints (e.g. Story -> false)
+    const [formatInfo] = await tx
+      .select({ hasCheckpoints: formats.hasCheckpoints })
+      .from(contents)
+      .leftJoin(formats, eq(contents.formatId, formats.id))
+      .where(eq(contents.id, contentId))
+      .limit(1);
+
+    const shouldCreateCheckpoints = formatInfo?.hasCheckpoints ?? true;
+
+    // 3. Insert post
     const [createdPost] = await tx
       .insert(posts)
       .values({
@@ -60,18 +70,22 @@ export async function addPost(
 
     const postId = createdPost.id;
 
-    // 3. Create the 3 snapshots (h24, d7, d30)
-    for (const checkpoint of CHECKPOINTS) {
-      const checkpointDue = dueAt(postDate, checkpoint);
-      await tx.insert(snapshots).values({
-        postId,
-        checkpoint,
-        dueAt: checkpointDue.toISOString(),
-        status: "pending",
-      });
+    // 4. Create the 3 snapshots (h24, d7, d30) when format tracks checkpoints
+    let checkpointsCreated = 0;
+    if (shouldCreateCheckpoints) {
+      for (const checkpoint of CHECKPOINTS) {
+        const checkpointDue = dueAt(postDate, checkpoint);
+        await tx.insert(snapshots).values({
+          postId,
+          checkpoint,
+          dueAt: checkpointDue.toISOString(),
+          status: "pending",
+        });
+        checkpointsCreated++;
+      }
     }
 
-    // 4. Recompute content status (transitions to "posted")
+    // 5. Recompute content status (transitions to "posted")
     await recomputeContent(tx, contentId);
 
     revalidatePath("/");
@@ -79,8 +93,9 @@ export async function addPost(
     revalidatePath(`/contents/${contentId}`);
     revalidatePath("/evaluate");
     revalidatePath("/references");
+    revalidatePath("/planner");
 
-    return ok({ id: postId });
+    return ok({ id: postId, checkpointsCreated });
   });
 }
 
@@ -101,7 +116,6 @@ export async function deletePost(
   if (!parsed.success) return fail("validation", "Invalid parameters");
 
   return await withTx(async (tx) => {
-    // Snapshots cascade on post delete (via foreign key)
     await tx.delete(posts).where(eq(posts.id, parsed.data.postId));
 
     await recomputeContent(tx, parsed.data.contentId);
@@ -110,6 +124,7 @@ export async function deletePost(
     revalidatePath("/contents");
     revalidatePath(`/contents/${parsed.data.contentId}`);
     revalidatePath("/evaluate");
+    revalidatePath("/planner");
 
     return ok({ id: parsed.data.postId });
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeTag, normalizeHandle, slugify } from "@/lib/domain/normalize";
+import { normalizeTag, normalizeHandle, slugify, matchHookTypeId } from "@/lib/domain/normalize";
 
 describe("lib/domain/normalize.ts (PRD §10.7 & §17.1)", () => {
   describe("normalizeTag", () => {
@@ -50,6 +50,27 @@ describe("lib/domain/normalize.ts (PRD §10.7 & §17.1)", () => {
 
     it("returns empty string for pure whitespace: '  ' -> ''", () => {
       expect(slugify("  ")).toBe("");
+    });
+  });
+
+  describe("matchHookTypeId", () => {
+    const sampleHooks = [
+      { id: "id-pov", name: "POV", slug: "pov" },
+      { id: "id-curiosity", name: "Curiosity gap (wait for it)", slug: "curiosity-gap" },
+      { id: "id-mistake", name: "Stop doing this (mistake)", slug: "mistake" },
+    ];
+
+    it("matches by slug phrase inside verbose AI guess", () => {
+      expect(matchHookTypeId("Negative Curiosity Gap & FOMO", sampleHooks)).toBe("id-curiosity");
+    });
+
+    it("matches exact or partial name case-insensitively", () => {
+      expect(matchHookTypeId("pov scene", sampleHooks)).toBe("id-pov");
+    });
+
+    it("returns null when no hook matches or guess is empty", () => {
+      expect(matchHookTypeId("", sampleHooks)).toBeNull();
+      expect(matchHookTypeId("Unrecognized Format", sampleHooks)).toBeNull();
     });
   });
 });

@@ -1,10 +1,11 @@
 import "server-only";
 import { cache } from "react";
-import { sql, eq, and, isNull, desc } from "drizzle-orm";
+import { sql, eq, and, isNull, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   refs,
   contents,
+  contentChecklist,
   snapshots,
   audios,
   sourceAccounts,
@@ -241,6 +242,27 @@ export const getHomeData = cache(async (): Promise<HomeData> => {
     const weeklyTarget = settingsQuery?.[0]?.weeklyPostTarget ?? 3;
     const weeklyPosted = Number(weeklyPostsRes?.[0]?.count) || 0;
 
+    const activeIds = (activeContentsQuery || []).map((c) => c.id);
+    const checklistRows =
+      activeIds.length > 0
+        ? await db
+            .select({
+              contentId: contentChecklist.contentId,
+              isDone: contentChecklist.isDone,
+            })
+            .from(contentChecklist)
+            .where(inArray(contentChecklist.contentId, activeIds))
+            .catch(() => [])
+        : [];
+
+    const checklistMap = new Map<string, { total: number; done: number }>();
+    for (const row of checklistRows) {
+      const stat = checklistMap.get(row.contentId) || { total: 0, done: 0 };
+      stat.total += 1;
+      if (row.isDone) stat.done += 1;
+      checklistMap.set(row.contentId, stat);
+    }
+
     return {
       counts,
       weeklyTarget: {
@@ -254,13 +276,16 @@ export const getHomeData = cache(async (): Promise<HomeData> => {
         status: r.status,
         savedAt: r.savedAt ? String(r.savedAt) : new Date().toISOString(),
       })),
-      activeContents: (activeContentsQuery || []).map((c) => ({
-        id: c.id,
-        title: c.title,
-        formatName: c.formatName,
-        checklistTotal: 5,
-        checklistDone: 2,
-      })),
+      activeContents: (activeContentsQuery || []).map((c) => {
+        const stats = checklistMap.get(c.id) || { total: 0, done: 0 };
+        return {
+          id: c.id,
+          title: c.title,
+          formatName: c.formatName,
+          checklistTotal: stats.total,
+          checklistDone: stats.done,
+        };
+      }),
     };
   } catch (err) {
     console.error("Error in getHomeData:", err);

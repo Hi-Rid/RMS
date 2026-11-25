@@ -228,7 +228,11 @@ export function ContentStudioClient({
       });
 
       if (res.ok) {
-        toast.success("Post added! 3 Checkpoints generated.");
+        toast.success(
+          res.data.checkpointsCreated > 0
+            ? `Post added! ${res.data.checkpointsCreated} evaluation checkpoints generated.`
+            : "Post recorded! (This format does not generate checkpoints)"
+        );
         setIsAddPostOpen(false);
         setPostUrl("");
         setPostCaption("");

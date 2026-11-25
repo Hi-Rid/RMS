@@ -15,10 +15,11 @@ interface AudioPageProps {
 export default async function AudioPage({ searchParams }: AudioPageProps) {
   const params = await searchParams;
   const items = await listAudios({
-    unusedOnly: params.unused === "1",
     searchText: params.q,
     sortBy: params.sort,
   });
+
+  const initialUnusedOnly = params.unused === "1";
 
   return (
     <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
@@ -40,7 +41,7 @@ export default async function AudioPage({ searchParams }: AudioPageProps) {
         </div>
       </div>
 
-      <AudioListClient initialItems={items} />
+      <AudioListClient initialItems={items} initialUnusedOnly={initialUnusedOnly} />
     </div>
   );
 }

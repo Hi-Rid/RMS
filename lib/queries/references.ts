@@ -260,10 +260,26 @@ const FALLBACK_MASTER_DATA: MasterData = {
 export async function getMasterData(): Promise<MasterData> {
   try {
     const [platformList, formatList, pillarList, hookTypeList] = await Promise.all([
-      db.select({ id: platforms.id, name: platforms.name, slug: platforms.slug }).from(platforms).orderBy(platforms.name),
-      db.select({ id: formats.id, name: formats.name, slug: formats.slug }).from(formats).orderBy(formats.sortOrder),
-      db.select({ id: pillars.id, name: pillars.name, slug: pillars.slug }).from(pillars).where(eq(pillars.isActive, true)).orderBy(pillars.sortOrder),
-      db.select({ id: hookTypes.id, name: hookTypes.name, slug: hookTypes.slug }).from(hookTypes).orderBy(hookTypes.sortOrder),
+      db
+        .select({ id: platforms.id, name: platforms.name, slug: platforms.slug })
+        .from(platforms)
+        .where(eq(platforms.isActive, true))
+        .orderBy(platforms.sortOrder, platforms.name),
+      db
+        .select({ id: formats.id, name: formats.name, slug: formats.slug })
+        .from(formats)
+        .where(eq(formats.isActive, true))
+        .orderBy(formats.sortOrder, formats.name),
+      db
+        .select({ id: pillars.id, name: pillars.name, slug: pillars.slug })
+        .from(pillars)
+        .where(eq(pillars.isActive, true))
+        .orderBy(pillars.sortOrder, pillars.name),
+      db
+        .select({ id: hookTypes.id, name: hookTypes.name, slug: hookTypes.slug })
+        .from(hookTypes)
+        .where(eq(hookTypes.isActive, true))
+        .orderBy(hookTypes.sortOrder, hookTypes.name),
     ]);
 
     return {
@@ -570,7 +586,7 @@ export async function getReferenceById(id: string): Promise<ReferenceListItem | 
 
     if (!row) return null;
 
-    const [refPillarsList, refElementsList] = await Promise.all([
+    const [refPillarsList, refElementsList, refImageList] = await Promise.all([
       db
         .select({
           id: pillars.id,
@@ -586,6 +602,15 @@ export async function getReferenceById(id: string): Promise<ReferenceListItem | 
         })
         .from(refElements)
         .where(eq(refElements.refId, id)),
+      db
+        .select({
+          storagePath: refImages.storagePath,
+        })
+        .from(refImages)
+        .where(eq(refImages.refId, id))
+        .orderBy(refImages.position)
+        .limit(1)
+        .catch(() => []),
     ]);
 
     return {
@@ -611,6 +636,7 @@ export async function getReferenceById(id: string): Promise<ReferenceListItem | 
       audio: row.audio?.id ? row.audio : null,
       pillars: refPillarsList,
       elements: refElementsList.map((e) => e.element),
+      coverUrl: refImageList[0]?.storagePath || null,
     };
   } catch (error) {
     console.warn(`Failed to get reference by ID ${id} (database fallback):`, error);

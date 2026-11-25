@@ -1,7 +1,7 @@
 import "server-only";
 import { eq, sql, desc, and, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { sourceAccounts, platforms, refs, contents, snapshots } from "@/db/schema";
+import { sourceAccounts, platforms, refs, contents } from "@/db/schema";
 
 export interface SourceListItem {
   id: string;
@@ -38,6 +38,15 @@ export async function listSources(params: {
         refsCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.sourceAccountId} = ${sourceAccounts.id} AND ${refs.archivedAt} IS NULL)`,
         selectedCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.sourceAccountId} = ${sourceAccounts.id} AND ${refs.status} = 'selected' AND ${refs.archivedAt} IS NULL)`,
         productionCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.sourceAccountId} = ${sourceAccounts.id} AND ${refs.status} = 'production' AND ${refs.archivedAt} IS NULL)`,
+        avgScore: sql<number | null>`(
+          SELECT round(avg(c.final_rating)::numeric, 1)
+          FROM ${refs} r
+          JOIN ${contents} c ON c.id = r.content_id
+          WHERE r.source_account_id = ${sourceAccounts.id}
+            AND r.archived_at IS NULL
+            AND c.archived_at IS NULL
+            AND c.final_rating IS NOT NULL
+        )`,
       })
       .from(sourceAccounts)
       .innerJoin(platforms, eq(sourceAccounts.platformId, platforms.id));
@@ -54,7 +63,7 @@ export async function listSources(params: {
       refsCount: r.refsCount || 0,
       selectedCount: r.selectedCount || 0,
       productionCount: r.productionCount || 0,
-      avgScore: null, // Computed from snapshots rating if available
+      avgScore: r.avgScore !== null && r.avgScore !== undefined ? Number(r.avgScore) : null,
       createdAt: r.createdAt,
     }));
 
@@ -70,8 +79,9 @@ export async function listSources(params: {
 
     if (sortBy === "handle") {
       items.sort((a, b) => a.handle.localeCompare(b.handle));
+    } else if (sortBy === "score") {
+      items.sort((a, b) => (b.avgScore ?? -1) - (a.avgScore ?? -1));
     } else {
-      // default: refs count desc
       items.sort((a, b) => b.refsCount - a.refsCount);
     }
 

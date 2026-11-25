@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Settings,
   Key,
   Database,
   Cpu,
-  Sparkles,
   CheckCircle2,
   AlertCircle,
   ExternalLink,
@@ -24,12 +24,14 @@ import {
   Loader2,
   LogOut,
   RefreshCw,
+  Pencil,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
@@ -38,6 +40,16 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { IngestTokenCard } from "./ingest-token-card";
 import {
@@ -46,8 +58,12 @@ import {
   testAiConnection,
   toggleMasterItem,
   createMasterItem,
+  updateMasterItem,
+  deleteMasterItem,
+  reorderMasterItem,
   type MasterTableType,
 } from "@/lib/actions/settings";
+import { signOut } from "@/lib/actions/auth";
 import type { AppSettingsQuery } from "@/lib/queries/settings";
 
 interface MasterItem {
@@ -56,14 +72,19 @@ interface MasterItem {
   slug: string;
   isActive: boolean;
   sortOrder: number;
+  usageCount?: number;
+  hasCheckpoints?: boolean;
+  domains?: string[];
+  isSource?: boolean;
+  isTarget?: boolean;
 }
 
 interface MasterDataPayload {
   pillars: MasterItem[];
   series: MasterItem[];
-  formats: (MasterItem & { hasCheckpoints?: boolean })[];
+  formats: MasterItem[];
   hookTypes: MasterItem[];
-  platforms: (MasterItem & { domains?: string[]; isSource?: boolean; isTarget?: boolean })[];
+  platforms: MasterItem[];
 }
 
 interface SystemLogItem {
@@ -71,7 +92,7 @@ interface SystemLogItem {
   kind: string;
   level: string;
   message: string;
-  meta: any;
+  meta: unknown;
   createdAt: string;
 }
 
@@ -80,14 +101,30 @@ interface SettingsClientProps {
   masterData: MasterDataPayload;
   systemLogs: SystemLogItem[];
   hasGeminiKey: boolean;
+  appUrl: string;
+  initialTab?: string;
 }
+
+const SINGULAR_LABEL: Record<MasterTableType, string> = {
+  pillars: "Pillar",
+  series: "Series",
+  formats: "Format",
+  hookTypes: "Hook Type",
+  platforms: "Platform",
+};
 
 export function SettingsClient({
   initialSettings,
   masterData,
   systemLogs,
   hasGeminiKey,
+  appUrl,
+  initialTab = "general",
 }: SettingsClientProps) {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState(initialTab);
+  const [isPending, startTransition] = useTransition();
+
   // General tab state
   const [weeklyTarget, setWeeklyTarget] = useState(initialSettings.weeklyPostTarget);
   const [insightMinSample, setInsightMinSample] = useState(initialSettings.insightMinSample);
@@ -108,17 +145,49 @@ export function SettingsClient({
 
   // Master data state
   const [master, setMaster] = useState(masterData);
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [activeMasterType, setActiveMasterType] = useState<MasterTableType>("pillars");
+
+  // Add Master Item modal
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [newItemName, setNewItemName] = useState("");
+  const [newHasCheckpoints, setNewHasCheckpoints] = useState(true);
+  const [newDomainsText, setNewDomainsText] = useState("");
   const [addingItem, setAddingItem] = useState(false);
+
+  // Edit Master Item modal
+  const [editingItem, setEditingItem] = useState<{
+    type: MasterTableType;
+    item: MasterItem;
+  } | null>(null);
+  const [editItemName, setEditItemName] = useState("");
+  const [editHasCheckpoints, setEditHasCheckpoints] = useState(true);
+  const [editDomainsText, setEditDomainsText] = useState("");
+  const [editIsSource, setEditIsSource] = useState(true);
+  const [editIsTarget, setEditIsTarget] = useState(true);
+  const [savingEditItem, setSavingEditItem] = useState(false);
+
+  // Delete Master Item alert dialog
+  const [deletingItem, setDeletingItem] = useState<{
+    type: MasterTableType;
+    item: MasterItem;
+  } | null>(null);
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
 
   // Logs state
   const [logFilterKind, setLogFilterKind] = useState("all");
   const [logFilterLevel, setLogFilterLevel] = useState("all");
 
+  function handleTabChange(val: string) {
+    setActiveTab(val);
+    router.replace(`/settings?tab=${val}`, { scroll: false });
+  }
+
   // Save General
   async function handleSaveGeneral() {
+    if (checklist.length === 0) {
+      toast.error("Default checklist must contain at least 1 step.");
+      return;
+    }
     setSavingGeneral(true);
     try {
       const res = await updateGeneralSettings({
@@ -128,6 +197,7 @@ export function SettingsClient({
       });
       if (res.ok) {
         toast.success("General settings saved successfully.");
+        router.refresh();
       } else {
         toast.error(res.error.message || "Failed to save settings.");
       }
@@ -144,13 +214,14 @@ export function SettingsClient({
     try {
       const res = await updateAiSettings({
         aiEnabled,
-        aiProvider: aiProvider as any,
+        aiProvider: aiProvider as "google" | "groq" | "openrouter",
         aiTextModel: aiTextModel || undefined,
         aiDailyCap,
         aiOutputLanguage: aiLanguage,
       });
       if (res.ok) {
         toast.success("AI configuration saved successfully.");
+        router.refresh();
       } else {
         toast.error(res.error.message || "Failed to save AI settings.");
       }
@@ -167,7 +238,7 @@ export function SettingsClient({
     try {
       const res = await testAiConnection();
       if (res.ok) {
-        toast.success(`AI Connection Successful! Latency: ${res.data.latencyMs}ms`);
+        toast.success(`${res.data.message} (${res.data.latencyMs}ms)`);
       } else {
         toast.error(res.error.message || "AI Connection test failed.");
       }
@@ -181,7 +252,6 @@ export function SettingsClient({
   // Master item toggle active
   async function handleToggleMaster(type: MasterTableType, id: string, currentState: boolean) {
     const newState = !currentState;
-    // optimistic update
     setMaster((prev) => ({
       ...prev,
       [type]: prev[type].map((it) => (it.id === id ? { ...it, isActive: newState } : it)),
@@ -189,14 +259,14 @@ export function SettingsClient({
 
     const res = await toggleMasterItem(type, id, newState);
     if (!res.ok) {
-      toast.error("Failed to update item status.");
-      // rollback
+      toast.error(res.error.message || "Failed to update item status.");
       setMaster((prev) => ({
         ...prev,
         [type]: prev[type].map((it) => (it.id === id ? { ...it, isActive: currentState } : it)),
       }));
     } else {
-      toast.success("Item status updated.");
+      toast.success(newState ? "Item activated." : "Item deactivated.");
+      router.refresh();
     }
   }
 
@@ -204,10 +274,18 @@ export function SettingsClient({
   async function handleAddMasterItem() {
     if (!newItemName.trim()) return;
     setAddingItem(true);
+    const parsedDomains = newDomainsText
+      .split(",")
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean);
+
     try {
-      const res = await createMasterItem(activeMasterType, newItemName.trim());
+      const res = await createMasterItem(activeMasterType, newItemName.trim(), {
+        hasCheckpoints: activeMasterType === "formats" ? newHasCheckpoints : undefined,
+        domains: activeMasterType === "platforms" && parsedDomains.length > 0 ? parsedDomains : undefined,
+      });
       if (res.ok) {
-        toast.success(`New ${activeMasterType} item added!`);
+        toast.success(`${SINGULAR_LABEL[activeMasterType]} added!`);
         setMaster((prev) => ({
           ...prev,
           [activeMasterType]: [
@@ -215,14 +293,27 @@ export function SettingsClient({
             {
               id: res.data.id,
               name: newItemName.trim(),
-              slug: newItemName.toLowerCase().replace(/\s+/g, "-"),
+              slug: res.data.slug,
               isActive: true,
-              sortOrder: prev[activeMasterType].length + 1,
+              sortOrder: res.data.sortOrder,
+              usageCount: 0,
+              hasCheckpoints: activeMasterType === "formats" ? newHasCheckpoints : undefined,
+              domains:
+                activeMasterType === "platforms"
+                  ? parsedDomains.length > 0
+                    ? parsedDomains
+                    : [`${res.data.slug}.com`]
+                  : undefined,
+              isSource: activeMasterType === "platforms" ? true : undefined,
+              isTarget: activeMasterType === "platforms" ? true : undefined,
             },
           ],
         }));
         setNewItemName("");
+        setNewDomainsText("");
+        setNewHasCheckpoints(true);
         setAddDialogOpen(false);
+        router.refresh();
       } else {
         toast.error(res.error.message || "Failed to add item.");
       }
@@ -233,12 +324,127 @@ export function SettingsClient({
     }
   }
 
+  // Open Edit Modal
+  function openEditDialog(type: MasterTableType, item: MasterItem) {
+    setEditingItem({ type, item });
+    setEditItemName(item.name);
+    setEditHasCheckpoints(item.hasCheckpoints ?? true);
+    setEditDomainsText((item.domains || []).filter(Boolean).join(", "));
+    setEditIsSource(item.isSource ?? true);
+    setEditIsTarget(item.isTarget ?? true);
+  }
+
+  // Save Edit Master Item
+  async function handleSaveEditMasterItem() {
+    if (!editingItem || !editItemName.trim()) return;
+    setSavingEditItem(true);
+
+    const { type, item } = editingItem;
+    const parsedDomains = editDomainsText
+      .split(",")
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean);
+
+    try {
+      const res = await updateMasterItem(type, item.id, {
+        name: editItemName.trim(),
+        ...(type === "formats" ? { hasCheckpoints: editHasCheckpoints } : {}),
+        ...(type === "platforms"
+          ? { domains: parsedDomains, isSource: editIsSource, isTarget: editIsTarget }
+          : {}),
+      });
+
+      if (res.ok) {
+        toast.success(`${SINGULAR_LABEL[type]} updated.`);
+        setMaster((prev) => ({
+          ...prev,
+          [type]: prev[type].map((it) =>
+            it.id === item.id
+              ? {
+                  ...it,
+                  name: editItemName.trim(),
+                  ...(type === "formats" ? { hasCheckpoints: editHasCheckpoints } : {}),
+                  ...(type === "platforms"
+                    ? { domains: parsedDomains, isSource: editIsSource, isTarget: editIsTarget }
+                    : {}),
+                }
+              : it
+          ),
+        }));
+        setEditingItem(null);
+        router.refresh();
+      } else {
+        toast.error(res.error.message || "Failed to update item.");
+      }
+    } catch {
+      toast.error("Network error updating item.");
+    } finally {
+      setSavingEditItem(false);
+    }
+  }
+
+  // Delete Master Item
+  async function handleConfirmDeleteMasterItem() {
+    if (!deletingItem) return;
+    const { type, item } = deletingItem;
+    setIsDeletingItem(true);
+    try {
+      const res = await deleteMasterItem(type, item.id);
+      if (res.ok) {
+        toast.success(`${SINGULAR_LABEL[type]} deleted.`);
+        setMaster((prev) => ({
+          ...prev,
+          [type]: prev[type].filter((it) => it.id !== item.id),
+        }));
+        setDeletingItem(null);
+        router.refresh();
+      } else {
+        toast.error(res.error.message || "Failed to delete item.");
+      }
+    } catch {
+      toast.error("Network error deleting item.");
+    } finally {
+      setIsDeletingItem(false);
+    }
+  }
+
+  // Reorder Master Item
+  async function handleReorderMaster(
+    type: MasterTableType,
+    id: string,
+    direction: "up" | "down"
+  ) {
+    const currentList = [...master[type]];
+    const idx = currentList.findIndex((it) => it.id === id);
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (idx === -1 || swapIdx < 0 || swapIdx >= currentList.length) return;
+
+    const [moved] = currentList.splice(idx, 1);
+    currentList.splice(swapIdx, 0, moved);
+
+    // Optimistic update
+    setMaster((prev) => ({
+      ...prev,
+      [type]: currentList.map((it, i) => ({ ...it, sortOrder: i + 1 })),
+    }));
+
+    const res = await reorderMasterItem(type, id, direction);
+    if (!res.ok) {
+      toast.error(res.error.message || "Failed to reorder item.");
+      setMaster((prev) => ({ ...prev, [type]: master[type] }));
+    } else {
+      router.refresh();
+    }
+  }
+
   // Filtered logs
   const filteredLogs = systemLogs.filter((log) => {
     if (logFilterKind !== "all" && log.kind !== logFilterKind) return false;
     if (logFilterLevel !== "all" && log.level !== logFilterLevel) return false;
     return true;
   });
+
+  const bookmarkletHref = `javascript:(function(){window.open('${appUrl}/inbox?add='+encodeURIComponent(location.href),'_blank');})();`;
 
   return (
     <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
@@ -253,7 +459,7 @@ export function SettingsClient({
         </p>
       </div>
 
-      <Tabs defaultValue="general" className="w-full space-y-6">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full space-y-6">
         <div className="border-b border-border/80 pb-2">
           <TabsList className="bg-secondary/60 p-1 rounded-lg border border-border flex flex-wrap">
             <TabsTrigger value="general" className="text-xs font-mono uppercase tracking-wider">
@@ -289,7 +495,7 @@ export function SettingsClient({
                   Weekly Targets & Thresholds
                 </CardTitle>
                 <CardDescription className="text-xs text-muted-foreground">
-                  Configured targets displayed in Planner and Home
+                  Configured targets displayed in Planner, Insight, and Home
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-0 space-y-4 pt-2 text-xs">
@@ -299,8 +505,8 @@ export function SettingsClient({
                   </label>
                   <Input
                     type="number"
-                    min={1}
-                    max={30}
+                    min={0}
+                    max={50}
                     value={weeklyTarget}
                     onChange={(e) => setWeeklyTarget(Number(e.target.value))}
                     className="font-mono text-xs"
@@ -428,12 +634,17 @@ export function SettingsClient({
                   </p>
                 </div>
 
-                <form action="/auth/signout" method="post">
-                  <Button variant="outline" size="sm" type="submit" className="h-8 text-xs font-mono gap-1.5">
-                    <LogOut className="size-3 text-muted-foreground" />
-                    <span>Sign Out</span>
-                  </Button>
-                </form>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => startTransition(() => signOut())}
+                  className="h-8 text-xs font-mono gap-1.5"
+                >
+                  <LogOut className="size-3 text-muted-foreground" />
+                  <span>Sign Out</span>
+                </Button>
               </div>
             </Card>
           </div>
@@ -441,46 +652,30 @@ export function SettingsClient({
 
         {/* Tab 2: Master Data */}
         <TabsContent value="master" className="space-y-6 focus-visible:outline-none">
-          <Tabs defaultValue="pillars" className="w-full space-y-4">
+          <Tabs
+            value={activeMasterType}
+            onValueChange={(val) => setActiveMasterType(val as MasterTableType)}
+            className="w-full space-y-4"
+          >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/80 pb-3">
               <TabsList className="bg-secondary/60 p-1 rounded-lg border border-border flex flex-wrap">
-                <TabsTrigger
-                  value="pillars"
-                  onClick={() => setActiveMasterType("pillars")}
-                  className="text-xs font-mono uppercase tracking-wider"
-                >
+                <TabsTrigger value="pillars" className="text-xs font-mono uppercase tracking-wider">
                   <Layers className="size-3 mr-1.5" />
                   Pillars ({master.pillars.length})
                 </TabsTrigger>
-                <TabsTrigger
-                  value="series"
-                  onClick={() => setActiveMasterType("series")}
-                  className="text-xs font-mono uppercase tracking-wider"
-                >
+                <TabsTrigger value="series" className="text-xs font-mono uppercase tracking-wider">
                   <Bookmark className="size-3 mr-1.5" />
                   Series ({master.series.length})
                 </TabsTrigger>
-                <TabsTrigger
-                  value="formats"
-                  onClick={() => setActiveMasterType("formats")}
-                  className="text-xs font-mono uppercase tracking-wider"
-                >
+                <TabsTrigger value="formats" className="text-xs font-mono uppercase tracking-wider">
                   <BarChart2 className="size-3 mr-1.5" />
                   Formats ({master.formats.length})
                 </TabsTrigger>
-                <TabsTrigger
-                  value="hookTypes"
-                  onClick={() => setActiveMasterType("hookTypes")}
-                  className="text-xs font-mono uppercase tracking-wider"
-                >
+                <TabsTrigger value="hookTypes" className="text-xs font-mono uppercase tracking-wider">
                   <Hash className="size-3 mr-1.5" />
                   Hook Types ({master.hookTypes.length})
                 </TabsTrigger>
-                <TabsTrigger
-                  value="platforms"
-                  onClick={() => setActiveMasterType("platforms")}
-                  className="text-xs font-mono uppercase tracking-wider"
-                >
+                <TabsTrigger value="platforms" className="text-xs font-mono uppercase tracking-wider">
                   <Globe className="size-3 mr-1.5" />
                   Platforms ({master.platforms.length})
                 </TabsTrigger>
@@ -492,45 +687,22 @@ export function SettingsClient({
                 className="h-8 text-xs font-mono gap-1.5"
               >
                 <Plus className="size-3" />
-                <span>Add Item</span>
+                <span>Add {SINGULAR_LABEL[activeMasterType]}</span>
               </Button>
             </div>
 
-            <TabsContent value="pillars">
-              <MasterTable
-                items={master.pillars}
-                type="pillars"
-                onToggle={(id, active) => handleToggleMaster("pillars", id, active)}
-              />
-            </TabsContent>
-            <TabsContent value="series">
-              <MasterTable
-                items={master.series}
-                type="series"
-                onToggle={(id, active) => handleToggleMaster("series", id, active)}
-              />
-            </TabsContent>
-            <TabsContent value="formats">
-              <MasterTable
-                items={master.formats}
-                type="formats"
-                onToggle={(id, active) => handleToggleMaster("formats", id, active)}
-              />
-            </TabsContent>
-            <TabsContent value="hookTypes">
-              <MasterTable
-                items={master.hookTypes}
-                type="hookTypes"
-                onToggle={(id, active) => handleToggleMaster("hookTypes", id, active)}
-              />
-            </TabsContent>
-            <TabsContent value="platforms">
-              <MasterTable
-                items={master.platforms}
-                type="platforms"
-                onToggle={(id, active) => handleToggleMaster("platforms", id, active)}
-              />
-            </TabsContent>
+            {(["pillars", "series", "formats", "hookTypes", "platforms"] as const).map((typeKey) => (
+              <TabsContent key={typeKey} value={typeKey}>
+                <MasterTable
+                  items={master[typeKey]}
+                  type={typeKey}
+                  onToggle={(id, active) => handleToggleMaster(typeKey, id, active)}
+                  onEdit={(item) => openEditDialog(typeKey, item)}
+                  onDelete={(item) => setDeletingItem({ type: typeKey, item })}
+                  onReorder={(id, dir) => handleReorderMaster(typeKey, id, dir)}
+                />
+              </TabsContent>
+            ))}
           </Tabs>
         </TabsContent>
 
@@ -545,12 +717,12 @@ export function SettingsClient({
                 Browser Bookmarklet (1-Click Reference Ingestion)
               </CardTitle>
               <CardDescription className="text-xs text-muted-foreground">
-                Drag this script to your browser bookmarks bar to ingest any active tab URL directly into RMS Inbox
+                Create a browser bookmark with this URL to send any active tab straight into your authenticated RMS Inbox
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0 pt-2 space-y-2">
               <pre className="p-3 rounded-lg bg-secondary/60 border border-border text-[11px] font-mono text-foreground overflow-x-auto select-all">
-                {`javascript:(function(){window.open('${typeof window !== "undefined" ? window.location.origin : ""}/api/ingest?url='+encodeURIComponent(location.href),'_blank');})();`}
+                {bookmarkletHref}
               </pre>
             </CardContent>
           </Card>
@@ -560,33 +732,42 @@ export function SettingsClient({
         <TabsContent value="ai" className="space-y-6 focus-visible:outline-none">
           {/* Status Banner */}
           <div
-            className={`p-4 rounded-xl border flex items-start gap-3.5 ${
-              hasGeminiKey
+            className={`p-4 rounded-xl border flex items-start justify-between gap-3.5 flex-wrap ${
+              hasGeminiKey && aiEnabled
                 ? "bg-primary/5 border-primary/30 text-foreground"
                 : "bg-amber-500/10 border-amber-500/30 text-foreground"
             }`}
           >
-            {hasGeminiKey ? (
-              <CheckCircle2 className="size-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-            ) : (
-              <AlertCircle className="size-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-            )}
-            <div className="space-y-1 text-xs">
-              <div className="font-bold flex items-center gap-2 font-display text-sm">
-                <span>Google Gemini API (Free Tier)</span>
-                <span
-                  className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded ${
-                    hasGeminiKey ? "bg-emerald-600 text-white" : "bg-amber-600 text-white"
-                  }`}
-                >
-                  {hasGeminiKey ? "Connected & Active" : "Key Required"}
-                </span>
+            <div className="flex items-start gap-3.5">
+              {hasGeminiKey && aiEnabled ? (
+                <CheckCircle2 className="size-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="size-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              )}
+              <div className="space-y-1 text-xs">
+                <div className="font-bold flex items-center gap-2 font-display text-sm">
+                  <span>Google Gemini API (Free Tier)</span>
+                  <span
+                    className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded ${
+                      hasGeminiKey && aiEnabled
+                        ? "bg-emerald-600 text-white"
+                        : "bg-amber-600 text-white"
+                    }`}
+                  >
+                    {!hasGeminiKey ? "Key Required" : aiEnabled ? "Connected & Active" : "Disabled"}
+                  </span>
+                </div>
+                <p className="text-muted-foreground leading-relaxed max-w-2xl">
+                  {hasGeminiKey
+                    ? "Free-tier requests may be used by Google to improve products. Only minimum text context is sent when you trigger an AI action."
+                    : "Add your Google Generative AI API Key to .env.local (GOOGLE_GENERATIVE_AI_API_KEY) to activate Auto-Bedah and AI generation."}
+                </p>
               </div>
-              <p className="text-muted-foreground leading-relaxed">
-                {hasGeminiKey
-                  ? "Gemini Flash Lite is connected with automatic fallback across Google AI Studio models (1,500 req/day free)."
-                  : "Add your Google Generative AI API Key to .env.local (GOOGLE_GENERATIVE_AI_API_KEY) to activate Auto-Bedah and AI generation."}
-              </p>
+            </div>
+
+            <div className="text-xs font-mono px-3 py-1.5 rounded-md border border-border bg-card">
+              Today: <strong>{initialSettings.aiUsedToday}</strong> /{" "}
+              {aiDailyCap === 0 ? "∞" : aiDailyCap}
             </div>
           </div>
 
@@ -627,16 +808,32 @@ export function SettingsClient({
                   </select>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                    Text Model Override (Empty = Default Flash Lite)
-                  </label>
-                  <Input
-                    placeholder="gemini-flash-lite-latest"
-                    value={aiTextModel}
-                    onChange={(e) => setAiTextModel(e.target.value)}
-                    className="font-mono text-xs"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                      Text Model Override
+                    </label>
+                    <Input
+                      placeholder="gemini-flash-lite-latest"
+                      value={aiTextModel}
+                      onChange={(e) => setAiTextModel(e.target.value)}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                      Daily Request Cap
+                    </label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={5000}
+                      value={aiDailyCap}
+                      onChange={(e) => setAiDailyCap(Number(e.target.value))}
+                      className="font-mono text-xs"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-1.5">
@@ -707,12 +904,16 @@ export function SettingsClient({
                     </a>
                   </li>
                   <li>Sign in with your Google account.</li>
-                  <li>Click <strong>Create API Key</strong>.</li>
-                  <li>Add to your <code>.env.local</code>:</li>
+                  <li>
+                    Click <strong>Create API Key</strong>.
+                  </li>
+                  <li>
+                    Add to your <code>.env.local</code>:
+                  </li>
                 </ol>
 
                 <pre className="p-3 rounded-lg bg-secondary/60 border border-border text-[11px] font-mono text-foreground overflow-x-auto select-all">
-GOOGLE_GENERATIVE_AI_API_KEY=AIzaSy...
+                  GOOGLE_GENERATIVE_AI_API_KEY=AIzaSy...
                 </pre>
               </CardContent>
             </Card>
@@ -732,7 +933,7 @@ GOOGLE_GENERATIVE_AI_API_KEY=AIzaSy...
                   </CardTitle>
                 </div>
                 <CardDescription className="text-xs text-muted-foreground">
-                  Per PRD §9.5: Complete offline backup of all 16 database tables
+                  Per PRD §9.5: Complete offline backup of all database tables
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-0 space-y-3 pt-2 text-xs">
@@ -770,7 +971,7 @@ GOOGLE_GENERATIVE_AI_API_KEY=AIzaSy...
                 </div>
                 <div className="flex justify-between py-1 border-b border-border/60">
                   <span className="text-muted-foreground">Tables Count:</span>
-                  <span className="font-bold text-foreground">16 tables</span>
+                  <span className="font-bold text-foreground">16 tables exported</span>
                 </div>
                 <div className="flex justify-between py-1 border-b border-border/60">
                   <span className="text-muted-foreground">pgvector Extension:</span>
@@ -807,7 +1008,7 @@ GOOGLE_GENERATIVE_AI_API_KEY=AIzaSy...
                   <option value="all">All Kinds</option>
                   <option value="ingest">Ingest</option>
                   <option value="ai">AI</option>
-                  <option value="export">Export</option>
+                  <option value="import">Import / Export</option>
                   <option value="cron">Cron</option>
                   <option value="auth">Auth</option>
                 </select>
@@ -851,11 +1052,11 @@ GOOGLE_GENERATIVE_AI_API_KEY=AIzaSy...
                           </span>
                           <span className="font-bold text-foreground">{log.message}</span>
                         </div>
-                        {log.meta && Object.keys(log.meta).length > 0 && (
+                        {log.meta && typeof log.meta === "object" && Object.keys(log.meta as object).length > 0 ? (
                           <div className="text-[10px] text-muted-foreground">
                             {JSON.stringify(log.meta)}
                           </div>
-                        )}
+                        ) : null}
                       </div>
                       <span className="text-[10px] text-muted-foreground shrink-0">
                         {new Date(log.createdAt).toLocaleTimeString()}
@@ -874,24 +1075,52 @@ GOOGLE_GENERATIVE_AI_API_KEY=AIzaSy...
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="text-base font-bold font-display uppercase tracking-wider">
-              Add New {activeMasterType.slice(0, -1)}
+              Add New {SINGULAR_LABEL[activeMasterType]}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            <label className="text-xs font-mono text-muted-foreground uppercase">Item Name</label>
-            <Input
-              placeholder={`Enter new ${activeMasterType.slice(0, -1)} name...`}
-              value={newItemName}
-              onChange={(e) => setNewItemName(e.target.value)}
-              className="text-xs font-mono"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleAddMasterItem();
-                }
-              }}
-            />
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-muted-foreground uppercase">Item Name</label>
+              <Input
+                placeholder={`Enter new ${SINGULAR_LABEL[activeMasterType].toLowerCase()} name...`}
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
+                className="text-xs font-mono"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAddMasterItem();
+                  }
+                }}
+              />
+            </div>
+
+            {activeMasterType === "formats" && (
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-secondary/30">
+                <div className="space-y-0.5 text-xs">
+                  <div className="font-bold font-display">Track Performance Checkpoints</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Create 24h, 7d, 30d snapshots when published (disable for Story)
+                  </div>
+                </div>
+                <Switch checked={newHasCheckpoints} onCheckedChange={setNewHasCheckpoints} />
+              </div>
+            )}
+
+            {activeMasterType === "platforms" && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-mono text-muted-foreground uppercase">
+                  Domains (comma separated)
+                </label>
+                <Input
+                  placeholder="instagram.com, instagr.am"
+                  value={newDomainsText}
+                  onChange={(e) => setNewDomainsText(e.target.value)}
+                  className="text-xs font-mono"
+                />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -914,6 +1143,118 @@ GOOGLE_GENERATIVE_AI_API_KEY=AIzaSy...
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Edit Master Item Dialog */}
+      <Dialog open={Boolean(editingItem)} onOpenChange={(open) => !open && setEditingItem(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold font-display uppercase tracking-wider">
+              Edit {editingItem ? SINGULAR_LABEL[editingItem.type] : "Item"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-muted-foreground uppercase">Name</label>
+              <Input
+                value={editItemName}
+                onChange={(e) => setEditItemName(e.target.value)}
+                className="text-xs font-mono"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSaveEditMasterItem();
+                  }
+                }}
+              />
+            </div>
+
+            {editingItem?.type === "formats" && (
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-secondary/30">
+                <div className="space-y-0.5 text-xs">
+                  <div className="font-bold font-display">Has Evaluation Checkpoints</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Generate 24h, 7d, 30d evaluation snapshots on publish
+                  </div>
+                </div>
+                <Switch checked={editHasCheckpoints} onCheckedChange={setEditHasCheckpoints} />
+              </div>
+            )}
+
+            {editingItem?.type === "platforms" && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-muted-foreground uppercase">
+                    Domains (comma separated)
+                  </label>
+                  <Input
+                    value={editDomainsText}
+                    onChange={(e) => setEditDomainsText(e.target.value)}
+                    placeholder="instagram.com, instagr.am"
+                    className="text-xs font-mono"
+                  />
+                </div>
+                <div className="flex items-center justify-between p-2.5 rounded border border-border bg-secondary/20 text-xs">
+                  <span>Source Platform (for references)</span>
+                  <Switch checked={editIsSource} onCheckedChange={setEditIsSource} />
+                </div>
+                <div className="flex items-center justify-between p-2.5 rounded border border-border bg-secondary/20 text-xs">
+                  <span>Target Platform (for publishing)</span>
+                  <Switch checked={editIsTarget} onCheckedChange={setEditIsTarget} />
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEditingItem(null)}
+              className="text-xs font-mono"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSaveEditMasterItem}
+              disabled={savingEditItem || !editItemName.trim()}
+              className="text-xs font-mono"
+            >
+              {savingEditItem ? <Loader2 className="size-3 animate-spin mr-1.5" /> : null}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Master Item Confirmation AlertDialog */}
+      <AlertDialog
+        open={Boolean(deletingItem)}
+        onOpenChange={(open) => !open && setDeletingItem(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {deletingItem ? SINGULAR_LABEL[deletingItem.type] : "Item"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs font-mono">
+              Are you sure you want to permanently delete &ldquo;{deletingItem?.item.name}&rdquo;? This
+              action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="text-xs font-mono">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={handleConfirmDeleteMasterItem}
+              disabled={isDeletingItem}
+              className="text-xs font-mono"
+            >
+              {isDeletingItem ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -922,10 +1263,16 @@ function MasterTable({
   items,
   type,
   onToggle,
+  onEdit,
+  onDelete,
+  onReorder,
 }: {
   items: MasterItem[];
   type: MasterTableType;
   onToggle: (id: string, active: boolean) => void;
+  onEdit: (item: MasterItem) => void;
+  onDelete: (item: MasterItem) => void;
+  onReorder: (id: string, direction: "up" | "down") => void;
 }) {
   if (items.length === 0) {
     return (
@@ -936,39 +1283,109 @@ function MasterTable({
   }
 
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
+    <div className="border border-border rounded-lg overflow-x-auto">
       <table className="w-full text-left text-xs">
         <thead className="bg-secondary/40 border-b border-border font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
           <tr>
-            <th className="py-2.5 px-3">#</th>
+            <th className="py-2.5 px-3 w-16">Order</th>
             <th className="py-2.5 px-3">Name</th>
-            <th className="py-2.5 px-3">Slug</th>
-            <th className="py-2.5 px-3 text-right">Status</th>
+            <th className="py-2.5 px-3">Details</th>
+            <th className="py-2.5 px-3 text-center">In Use</th>
+            <th className="py-2.5 px-3 text-center">Status</th>
+            <th className="py-2.5 px-3 text-right">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border/60">
-          {items.map((item, idx) => (
-            <tr key={item.id} className="hover:bg-secondary/20 transition-colors">
-              <td className="py-2.5 px-3 font-mono text-[11px] text-muted-foreground">
-                {idx + 1}
-              </td>
-              <td className="py-2.5 px-3 font-bold text-foreground">{item.name}</td>
-              <td className="py-2.5 px-3 font-mono text-muted-foreground">{item.slug}</td>
-              <td className="py-2.5 px-3 text-right">
-                <button
-                  type="button"
-                  onClick={() => onToggle(item.id, item.isActive)}
-                  className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider transition-colors ${
-                    item.isActive
-                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  }`}
-                >
-                  {item.isActive ? "Active" : "Inactive"}
-                </button>
-              </td>
-            </tr>
-          ))}
+          {items.map((item, idx) => {
+            const usage = item.usageCount || 0;
+            const isUsed = usage > 0;
+            return (
+              <tr key={item.id} className="hover:bg-secondary/20 transition-colors">
+                <td className="py-2.5 px-3">
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() => onReorder(item.id, "up")}
+                      aria-label={`Move ${item.name} up`}
+                      className="p-1 rounded hover:bg-secondary disabled:opacity-30 disabled:pointer-events-none text-muted-foreground hover:text-foreground"
+                    >
+                      <ArrowUp className="size-3" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === items.length - 1}
+                      onClick={() => onReorder(item.id, "down")}
+                      aria-label={`Move ${item.name} down`}
+                      className="p-1 rounded hover:bg-secondary disabled:opacity-30 disabled:pointer-events-none text-muted-foreground hover:text-foreground"
+                    >
+                      <ArrowDown className="size-3" />
+                    </button>
+                  </div>
+                </td>
+                <td className="py-2.5 px-3">
+                  <div className="font-bold text-foreground">{item.name}</div>
+                  <div className="font-mono text-[10px] text-muted-foreground">{item.slug}</div>
+                </td>
+                <td className="py-2.5 px-3 font-mono text-[11px] text-muted-foreground">
+                  {type === "formats" && (
+                    <span>
+                      {item.hasCheckpoints !== false ? "Checkpoints: 24h/7d/30d" : "No checkpoints"}
+                    </span>
+                  )}
+                  {type === "platforms" && (
+                    <span className="truncate block max-w-[220px]">
+                      {(item.domains || []).filter(Boolean).join(", ") || "—"}
+                    </span>
+                  )}
+                  {type !== "formats" && type !== "platforms" && <span>—</span>}
+                </td>
+                <td className="py-2.5 px-3 text-center font-mono">
+                  <span className="text-[11px] text-muted-foreground">{usage}</span>
+                </td>
+                <td className="py-2.5 px-3 text-center">
+                  <button
+                    type="button"
+                    onClick={() => onToggle(item.id, item.isActive)}
+                    className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider transition-colors ${
+                      item.isActive
+                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    }`}
+                  >
+                    {item.isActive ? "Active" : "Inactive"}
+                  </button>
+                </td>
+                <td className="py-2.5 px-3 text-right">
+                  <div className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onEdit(item)}
+                      aria-label={`Edit ${item.name}`}
+                      title={`Edit ${item.name}`}
+                      className="p-1.5 rounded hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Pencil className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isUsed}
+                      onClick={() => onDelete(item)}
+                      aria-label={`Delete ${item.name}`}
+                      title={
+                        isUsed
+                          ? `In use by ${usage} item(s) — deactivate instead`
+                          : `Delete ${item.name}`
+                      }
+                      className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

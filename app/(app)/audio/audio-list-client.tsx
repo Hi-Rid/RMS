@@ -20,12 +20,16 @@ import type { AudioListItem } from "@/lib/queries/audio";
 
 interface AudioListClientProps {
   initialItems: AudioListItem[];
+  initialUnusedOnly?: boolean;
 }
 
-export function AudioListClient({ initialItems }: AudioListClientProps) {
+export function AudioListClient({
+  initialItems,
+  initialUnusedOnly = false,
+}: AudioListClientProps) {
   const [items, setItems] = useState<AudioListItem[]>(initialItems);
   const [searchText, setSearchText] = useState("");
-  const [filterUnused, setFilterUnused] = useState(false);
+  const [filterUnused, setFilterUnused] = useState(initialUnusedOnly);
   const [sortBy, setSortBy] = useState<"recent" | "title" | "refs">("recent");
 
   // Create Audio Modal State

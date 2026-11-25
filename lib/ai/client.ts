@@ -16,7 +16,7 @@ export function getGoogleClient() {
 }
 
 // Resilient priority order of models available in Google AI Studio
-export const CANDIDATE_MODELS = [
+export const DEFAULT_CANDIDATE_MODELS = [
   process.env.AI_TEXT_MODEL,
   "gemini-flash-lite-latest",
   "gemini-3.8-flash",
@@ -25,31 +25,45 @@ export const CANDIDATE_MODELS = [
   "gemini-pro-latest",
 ].filter(Boolean) as string[];
 
+export function buildCandidateModels(preferredModel?: string | null): string[] {
+  const list = [
+    preferredModel?.trim(),
+    ...DEFAULT_CANDIDATE_MODELS,
+  ].filter(Boolean) as string[];
+  return Array.from(new Set(list));
+}
+
 export function getGeminiModel(modelName?: string) {
   const google = getGoogleClient();
   if (!google) return null;
-  return google(modelName || CANDIDATE_MODELS[0]);
+  return google(modelName || DEFAULT_CANDIDATE_MODELS[0]);
 }
 
 /**
  * Runs an AI operation with automatic model fallback in case of high demand (503) or unavailability (404).
  */
 export async function runWithModelFallback<T>(
-  fn: (model: ReturnType<NonNullable<ReturnType<typeof getGoogleClient>>>) => Promise<T>
+  fn: (
+    model: ReturnType<NonNullable<ReturnType<typeof getGoogleClient>>>,
+    modelName: string
+  ) => Promise<T>,
+  preferredModel?: string | null
 ): Promise<T> {
   const google = getGoogleClient();
   if (!google) {
     throw new Error("Google Gemini API client is not configured.");
   }
 
+  const candidates = buildCandidateModels(preferredModel);
   let lastError: unknown;
-  for (const modelName of CANDIDATE_MODELS) {
+  for (const modelName of candidates) {
     try {
       const model = google(modelName);
-      return await fn(model);
-    } catch (err: any) {
+      return await fn(model, modelName);
+    } catch (err: unknown) {
       lastError = err;
-      console.warn(`Model ${modelName} returned error, attempting fallback:`, err?.message || err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`Model ${modelName} returned error, attempting fallback:`, msg);
       continue;
     }
   }

@@ -28,7 +28,7 @@ function getPlatformBadge(slug: string) {
 export function SourcesListClient({ initialItems }: SourcesListClientProps) {
   const [items] = useState<SourceListItem[]>(initialItems);
   const [searchText, setSearchText] = useState("");
-  const [sortBy, setSortBy] = useState<"refs" | "handle">("refs");
+  const [sortBy, setSortBy] = useState<"refs" | "handle" | "score">("refs");
 
   const filteredItems = items
     .filter((item) => {
@@ -42,6 +42,7 @@ export function SourcesListClient({ initialItems }: SourcesListClientProps) {
     })
     .sort((a, b) => {
       if (sortBy === "handle") return a.handle.localeCompare(b.handle);
+      if (sortBy === "score") return (b.avgScore ?? -1) - (a.avgScore ?? -1);
       return b.refsCount - a.refsCount;
     });
 
@@ -65,10 +66,11 @@ export function SourcesListClient({ initialItems }: SourcesListClientProps) {
           <span className="text-muted-foreground uppercase text-[10px]">Sort:</span>
           <select
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
+            onChange={(e) => setSortBy(e.target.value as "refs" | "handle" | "score")}
             className="bg-transparent text-xs font-mono uppercase tracking-wider outline-none text-foreground cursor-pointer font-bold"
           >
             <option value="refs">References Count</option>
+            <option value="score">Avg Rating</option>
             <option value="handle">Handle (A-Z)</option>
           </select>
         </div>
@@ -94,6 +96,7 @@ export function SourcesListClient({ initialItems }: SourcesListClientProps) {
                   <th className="py-3 px-4 font-bold text-center">References</th>
                   <th className="py-3 px-4 font-bold text-center">Selected</th>
                   <th className="py-3 px-4 font-bold text-center">In Production</th>
+                  <th className="py-3 px-4 font-bold text-center">Avg Rating</th>
                   <th className="py-3 px-4 font-bold text-right">Actions</th>
                 </tr>
               </thead>
@@ -140,6 +143,13 @@ export function SourcesListClient({ initialItems }: SourcesListClientProps) {
                         </span>
                       ) : (
                         <span className="text-muted-foreground">0</span>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-4 text-center font-mono font-bold">
+                      {item.avgScore !== null ? (
+                        <span>★ {item.avgScore.toFixed(1)}</span>
+                      ) : (
+                        <span className="text-muted-foreground font-normal">—</span>
                       )}
                     </td>
                     <td className="py-3.5 px-4 text-right">

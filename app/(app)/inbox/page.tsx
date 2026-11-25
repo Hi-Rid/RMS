@@ -4,10 +4,16 @@ import { ReferenceCard } from "@/components/app/reference-card";
 import { Button } from "@/components/ui/button";
 import { Inbox, Play, CheckCheck, Plus } from "lucide-react";
 import { AddLinksDialog } from "@/components/app/add-links-dialog";
+import { InboxBookmarkletIngest } from "@/components/app/inbox-bookmarklet-ingest";
 
 export const instant = false;
 
-export default async function InboxPage() {
+interface InboxPageProps {
+  searchParams: Promise<{ add?: string }>;
+}
+
+export default async function InboxPage({ searchParams }: InboxPageProps) {
+  const params = await searchParams;
   const [items, masterData] = await Promise.all([
     getInboxReferences(),
     getMasterData(),
@@ -17,6 +23,8 @@ export default async function InboxPage() {
 
   return (
     <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
+      <InboxBookmarkletIngest addUrl={params.add} />
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/80 pb-6">
         <div className="space-y-1">

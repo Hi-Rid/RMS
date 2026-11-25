@@ -1,12 +1,12 @@
 "use server";
 
 import crypto from "crypto";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, asc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
-import { db } from "@/lib/db";
+import { db, withTx } from "@/lib/db";
 import {
   appSettings,
   systemLogs,
@@ -23,6 +23,7 @@ import {
 } from "@/db/schema";
 import { getAppSettings } from "@/lib/queries/settings";
 import { getGoogleClient, runWithModelFallback } from "@/lib/ai/client";
+import { slugify } from "@/lib/domain/normalize";
 import { generateText } from "ai";
 
 /**
@@ -79,7 +80,7 @@ export async function getIngestSettings(): Promise<
 const generalSettingsSchema = z.object({
   weeklyPostTarget: z.number().min(0).max(50),
   insightMinSample: z.number().min(1).max(20),
-  defaultChecklist: z.array(z.string().min(1)),
+  defaultChecklist: z.array(z.string().trim().min(1).max(120)).min(1),
 });
 
 export async function updateGeneralSettings(
@@ -87,17 +88,23 @@ export async function updateGeneralSettings(
 ): Promise<ActionResult<void>> {
   await requireActionOwner();
 
+  const parsed = generalSettingsSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid general settings");
+  }
+
   try {
     await db
       .update(appSettings)
       .set({
-        weeklyPostTarget: input.weeklyPostTarget,
-        insightMinSample: input.insightMinSample,
-        defaultChecklist: input.defaultChecklist,
+        weeklyPostTarget: parsed.data.weeklyPostTarget,
+        insightMinSample: parsed.data.insightMinSample,
+        defaultChecklist: parsed.data.defaultChecklist,
         updatedAt: sql`now()`,
       })
       .where(eq(appSettings.id, 1));
 
+    revalidatePath("/");
     revalidatePath("/settings");
     revalidatePath("/planner");
     revalidatePath("/insight");
@@ -123,21 +130,29 @@ export async function updateAiSettings(
 ): Promise<ActionResult<void>> {
   await requireActionOwner();
 
+  const parsed = aiSettingsSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid AI settings");
+  }
+
   try {
     await db
       .update(appSettings)
       .set({
-        aiEnabled: input.aiEnabled,
-        aiProvider: input.aiProvider,
-        aiTextModel: input.aiTextModel || "gemini-flash-lite-latest",
-        aiVisionModel: input.aiVisionModel ?? null,
-        aiDailyCap: input.aiDailyCap,
-        aiOutputLanguage: input.aiOutputLanguage,
+        aiEnabled: parsed.data.aiEnabled,
+        aiProvider: parsed.data.aiProvider,
+        aiTextModel: parsed.data.aiTextModel?.trim() || "gemini-flash-lite-latest",
+        aiVisionModel: parsed.data.aiVisionModel?.trim() || null,
+        aiDailyCap: parsed.data.aiDailyCap,
+        aiOutputLanguage: parsed.data.aiOutputLanguage,
         updatedAt: sql`now()`,
       })
       .where(eq(appSettings.id, 1));
 
     revalidatePath("/settings");
+    revalidatePath("/references");
+    revalidatePath("/contents");
+    revalidatePath("/insight");
 
     return ok();
   } catch (err) {
@@ -150,7 +165,7 @@ export async function updateAiSettings(
  * Tests connection to the configured AI model (PRD §12.17 & §14.2).
  */
 export async function testAiConnection(): Promise<
-  ActionResult<{ message: string; latencyMs: number }>
+  ActionResult<{ message: string; latencyMs: number; model: string }>
 > {
   await requireActionOwner();
 
@@ -159,26 +174,30 @@ export async function testAiConnection(): Promise<
     return fail("ai_disabled", "No Gemini API key configured in .env.local or environment.");
   }
 
+  const settings = await getAppSettings();
   const start = Date.now();
   try {
-    const text = await runWithModelFallback(async (model) => {
-      const res = await generateText({
-        model,
-        prompt: "Respond with exactly: 'OK'",
-      });
-      return res.text.trim();
-    });
+    const { text, modelUsed } = await runWithModelFallback(
+      async (model, modelName) => {
+        const res = await generateText({
+          model,
+          prompt: "Respond with exactly: 'OK'",
+        });
+        return { text: res.text.trim(), modelUsed: modelName };
+      },
+      settings.aiTextModel
+    );
 
     const latencyMs = Date.now() - start;
 
     await db.insert(systemLogs).values({
       kind: "ai",
       level: "info",
-      message: `AI Test Connection successful (${latencyMs}ms)`,
-      meta: { response: text },
+      message: `AI Test Connection successful using ${modelUsed} (${latencyMs}ms)`,
+      meta: { response: text, model: modelUsed },
     });
 
-    return ok({ message: "Connection successful!", latencyMs });
+    return ok({ message: `Connected via ${modelUsed}`, latencyMs, model: modelUsed });
   } catch (err: unknown) {
     console.error("AI connection test failed:", err);
     return fail("ai_failed", "AI connection test failed. Check key validity and quota.");
@@ -186,6 +205,31 @@ export async function testAiConnection(): Promise<
 }
 
 export type MasterTableType = "pillars" | "series" | "formats" | "hookTypes" | "platforms";
+
+function getMasterTable(tableType: MasterTableType) {
+  switch (tableType) {
+    case "pillars":
+      return pillars;
+    case "series":
+      return series;
+    case "formats":
+      return formats;
+    case "hookTypes":
+      return hookTypes;
+    case "platforms":
+      return platforms;
+  }
+}
+
+function revalidateMasterConsumers() {
+  revalidatePath("/settings");
+  revalidatePath("/references");
+  revalidatePath("/inbox");
+  revalidatePath("/inbox/triage");
+  revalidatePath("/contents");
+  revalidatePath("/contents/new");
+  revalidatePath("/");
+}
 
 /**
  * Toggles an item's active state in Master Data (PRD §12.17).
@@ -198,25 +242,13 @@ export async function toggleMasterItem(
   await requireActionOwner();
 
   try {
-    switch (tableType) {
-      case "pillars":
-        await db.update(pillars).set({ isActive }).where(eq(pillars.id, id));
-        break;
-      case "series":
-        await db.update(series).set({ isActive }).where(eq(series.id, id));
-        break;
-      case "formats":
-        await db.update(formats).set({ isActive }).where(eq(formats.id, id));
-        break;
-      case "hookTypes":
-        await db.update(hookTypes).set({ isActive }).where(eq(hookTypes.id, id));
-        break;
-      case "platforms":
-        await db.update(platforms).set({ isActive }).where(eq(platforms.id, id));
-        break;
-    }
+    const tbl = getMasterTable(tableType);
+    await db
+      .update(tbl)
+      .set({ isActive, updatedAt: sql`now()` })
+      .where(eq(tbl.id, id));
 
-    revalidatePath("/settings");
+    revalidateMasterConsumers();
     return ok();
   } catch (err) {
     console.error(`Error toggling master item ${tableType}:`, err);
@@ -229,27 +261,36 @@ export async function toggleMasterItem(
  */
 export async function createMasterItem(
   tableType: MasterTableType,
-  name: string
-): Promise<ActionResult<{ id: string }>> {
+  name: string,
+  extra?: {
+    hasCheckpoints?: boolean;
+    domains?: string[];
+    isSource?: boolean;
+    isTarget?: boolean;
+  }
+): Promise<ActionResult<{ id: string; slug: string; sortOrder: number }>> {
   await requireActionOwner();
 
   const trimmed = name.trim();
-  if (!trimmed) {
-    return fail("validation", "Name cannot be empty");
+  if (!trimmed || trimmed.length > 60) {
+    return fail("validation", "Name must be between 1 and 60 characters");
   }
 
-  const slug = trimmed
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)+/g, "");
+  const baseSlug = slugify(trimmed) || `item-${Date.now()}`;
 
   try {
+    const tbl = getMasterTable(tableType);
+    const [maxOrderRes] = await db
+      .select({ maxOrder: sql<number>`coalesce(max(${tbl.sortOrder}), 0)::int` })
+      .from(tbl);
+    const nextOrder = (Number(maxOrderRes?.maxOrder) || 0) + 1;
+
     let newId = "";
     switch (tableType) {
       case "pillars": {
         const [row] = await db
           .insert(pillars)
-          .values({ name: trimmed, slug, isActive: true })
+          .values({ name: trimmed, slug: baseSlug, sortOrder: nextOrder, isActive: true })
           .returning({ id: pillars.id });
         newId = row.id;
         break;
@@ -257,7 +298,7 @@ export async function createMasterItem(
       case "series": {
         const [row] = await db
           .insert(series)
-          .values({ name: trimmed, slug, isActive: true })
+          .values({ name: trimmed, slug: baseSlug, sortOrder: nextOrder, isActive: true })
           .returning({ id: series.id });
         newId = row.id;
         break;
@@ -265,7 +306,13 @@ export async function createMasterItem(
       case "formats": {
         const [row] = await db
           .insert(formats)
-          .values({ name: trimmed, slug, isActive: true, hasCheckpoints: true })
+          .values({
+            name: trimmed,
+            slug: baseSlug,
+            sortOrder: nextOrder,
+            isActive: true,
+            hasCheckpoints: extra?.hasCheckpoints ?? true,
+          })
           .returning({ id: formats.id });
         newId = row.id;
         break;
@@ -273,24 +320,40 @@ export async function createMasterItem(
       case "hookTypes": {
         const [row] = await db
           .insert(hookTypes)
-          .values({ name: trimmed, slug, isActive: true })
+          .values({ name: trimmed, slug: baseSlug, sortOrder: nextOrder, isActive: true })
           .returning({ id: hookTypes.id });
         newId = row.id;
         break;
       }
       case "platforms": {
+        const domainsList =
+          extra?.domains && extra.domains.length > 0
+            ? extra.domains
+            : [`${baseSlug}.com`];
         const [row] = await db
           .insert(platforms)
-          .values({ name: trimmed, slug, isActive: true, domains: [slug] })
+          .values({
+            name: trimmed,
+            slug: baseSlug,
+            sortOrder: nextOrder,
+            isActive: true,
+            domains: domainsList,
+            isSource: extra?.isSource ?? true,
+            isTarget: extra?.isTarget ?? true,
+          })
           .returning({ id: platforms.id });
         newId = row.id;
         break;
       }
     }
 
-    revalidatePath("/settings");
-    return ok({ id: newId });
-  } catch (err) {
+    revalidateMasterConsumers();
+    return ok({ id: newId, slug: baseSlug, sortOrder: nextOrder });
+  } catch (err: unknown) {
+    const pgErr = err as { code?: string };
+    if (pgErr.code === "23505") {
+      return fail("duplicate", `"${trimmed}" already exists in ${tableType}`);
+    }
     console.error(`Error creating master item ${tableType}:`, err);
     return fail("internal", "Failed to create master item");
   }
@@ -306,48 +369,67 @@ export async function updateMasterItem(
     name: string;
     hasCheckpoints?: boolean;
     domains?: string[];
+    isSource?: boolean;
+    isTarget?: boolean;
   }
 ): Promise<ActionResult<void>> {
   await requireActionOwner();
   const trimmed = input.name.trim();
-  if (!trimmed) {
-    return fail("validation", "Name cannot be empty");
+  if (!trimmed || trimmed.length > 60) {
+    return fail("validation", "Name must be between 1 and 60 characters");
   }
 
   try {
     switch (tableType) {
       case "pillars":
-        await db.update(pillars).set({ name: trimmed }).where(eq(pillars.id, id));
+        await db
+          .update(pillars)
+          .set({ name: trimmed, updatedAt: sql`now()` })
+          .where(eq(pillars.id, id));
         break;
       case "series":
-        await db.update(series).set({ name: trimmed }).where(eq(series.id, id));
+        await db
+          .update(series)
+          .set({ name: trimmed, updatedAt: sql`now()` })
+          .where(eq(series.id, id));
         break;
       case "formats":
         await db
           .update(formats)
           .set({
             name: trimmed,
+            updatedAt: sql`now()`,
             ...(input.hasCheckpoints !== undefined ? { hasCheckpoints: input.hasCheckpoints } : {}),
           })
           .where(eq(formats.id, id));
         break;
       case "hookTypes":
-        await db.update(hookTypes).set({ name: trimmed }).where(eq(hookTypes.id, id));
+        await db
+          .update(hookTypes)
+          .set({ name: trimmed, updatedAt: sql`now()` })
+          .where(eq(hookTypes.id, id));
         break;
       case "platforms":
         await db
           .update(platforms)
           .set({
             name: trimmed,
+            updatedAt: sql`now()`,
             ...(input.domains ? { domains: input.domains } : {}),
+            ...(input.isSource !== undefined ? { isSource: input.isSource } : {}),
+            ...(input.isTarget !== undefined ? { isTarget: input.isTarget } : {}),
           })
           .where(eq(platforms.id, id));
         break;
     }
 
-    revalidatePath("/settings");
+    revalidateMasterConsumers();
     return ok();
-  } catch (err) {
+  } catch (err: unknown) {
+    const pgErr = err as { code?: string };
+    if (pgErr.code === "23505") {
+      return fail("duplicate", `"${trimmed}" already exists`);
+    }
     console.error(`Error updating master item ${tableType}:`, err);
     return fail("internal", "Failed to update master item");
   }
@@ -379,7 +461,7 @@ export async function deleteMasterItem(
         if (totalUsed > 0) {
           return fail(
             "blocked",
-            `Cannot delete: Pillar is currently in use by ${totalUsed} reference(s) or content(s). Deactivate it instead.`
+            `Cannot delete: Pillar is currently used by ${totalUsed} reference(s) or content(s). Deactivate it instead.`
           );
         }
         await db.delete(pillars).where(eq(pillars.id, id));
@@ -464,7 +546,7 @@ export async function deleteMasterItem(
       }
     }
 
-    revalidatePath("/settings");
+    revalidateMasterConsumers();
     return ok();
   } catch (err) {
     console.error(`Error deleting master item ${tableType}:`, err);
@@ -473,52 +555,47 @@ export async function deleteMasterItem(
 }
 
 /**
- * Changes sort order of a master data item (Move Up / Move Down).
+ * Deterministically swaps sort order of a master data item (Move Up / Move Down).
  */
 export async function reorderMasterItem(
   tableType: MasterTableType,
   id: string,
   direction: "up" | "down"
-): Promise<ActionResult<void>> {
+): Promise<ActionResult<{ orderedIds: string[] }>> {
   await requireActionOwner();
-  const delta = direction === "up" ? -1 : 1;
 
   try {
-    switch (tableType) {
-      case "pillars":
-        await db
-          .update(pillars)
-          .set({ sortOrder: sql`${pillars.sortOrder} + ${delta}` })
-          .where(eq(pillars.id, id));
-        break;
-      case "series":
-        await db
-          .update(series)
-          .set({ sortOrder: sql`${series.sortOrder} + ${delta}` })
-          .where(eq(series.id, id));
-        break;
-      case "formats":
-        await db
-          .update(formats)
-          .set({ sortOrder: sql`${formats.sortOrder} + ${delta}` })
-          .where(eq(formats.id, id));
-        break;
-      case "hookTypes":
-        await db
-          .update(hookTypes)
-          .set({ sortOrder: sql`${hookTypes.sortOrder} + ${delta}` })
-          .where(eq(hookTypes.id, id));
-        break;
-      case "platforms":
-        await db
-          .update(platforms)
-          .set({ sortOrder: sql`${platforms.sortOrder} + ${delta}` })
-          .where(eq(platforms.id, id));
-        break;
-    }
+    const tbl = getMasterTable(tableType);
+    const orderedIds = await withTx(async (tx) => {
+      const rows = await tx
+        .select({ id: tbl.id })
+        .from(tbl)
+        .orderBy(asc(tbl.sortOrder), asc(tbl.name));
 
-    revalidatePath("/settings");
-    return ok();
+      const idx = rows.findIndex((r) => r.id === id);
+      if (idx === -1) return rows.map((r) => r.id);
+
+      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (swapIdx < 0 || swapIdx >= rows.length) {
+        return rows.map((r) => r.id);
+      }
+
+      const nextRows = [...rows];
+      const [moved] = nextRows.splice(idx, 1);
+      nextRows.splice(swapIdx, 0, moved);
+
+      for (let i = 0; i < nextRows.length; i++) {
+        await tx
+          .update(tbl)
+          .set({ sortOrder: i + 1 })
+          .where(eq(tbl.id, nextRows[i].id));
+      }
+
+      return nextRows.map((r) => r.id);
+    });
+
+    revalidateMasterConsumers();
+    return ok({ orderedIds });
   } catch (err) {
     console.error(`Error reordering master item ${tableType}:`, err);
     return fail("internal", "Failed to reorder master item");

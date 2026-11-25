@@ -30,6 +30,7 @@ import {
   setReferenceStatus,
 } from "@/lib/actions/references";
 import { aiBedahReference } from "@/lib/actions/ai";
+import { matchHookTypeId } from "@/lib/domain/normalize";
 import { toast } from "sonner";
 import { Sparkles } from "lucide-react";
 import type { ReferenceListItem, MasterData } from "@/lib/queries/references";
@@ -77,6 +78,8 @@ export function ReferenceDetailClient({
         (prev) =>
           `${prev ? prev + "\n\n" : ""}Key Takeaway: ${res.data.keyTakeaway}\n\nAdaptation Ideas:\n- ${res.data.adaptIdeas.join("\n- ")}`
       );
+      const matchedHookId = matchHookTypeId(res.data.hookType, masterData.hookTypes);
+      if (matchedHookId) setHookTypeId(matchedHookId);
       if (res.data.suggestedTags?.length) {
         setTagsInput(res.data.suggestedTags.join(", "));
       }
@@ -261,7 +264,7 @@ export function ReferenceDetailClient({
               url={reference.url}
               platform={reference.platform.slug}
               format={reference.format?.name}
-              coverUrl={null}
+              coverUrl={reference.coverUrl}
               hookText={reference.hookText}
               summary={reference.summary}
               handle={reference.sourceAccount?.handle}

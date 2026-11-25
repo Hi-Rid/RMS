@@ -55,3 +55,23 @@ export function slugify(text: string): string {
   s = s.replace(/^-+|-+$/g, "");
   return s;
 }
+
+/**
+ * Matches a free-text hook archetype returned by AI against configured hook types.
+ */
+export function matchHookTypeId(
+  guess: string | null | undefined,
+  hookTypes: { id: string; name: string; slug: string }[]
+): string | null {
+  if (!guess || hookTypes.length === 0) return null;
+  const needle = guess.trim().toLowerCase();
+  if (!needle) return null;
+
+  const matched = hookTypes.find((ht) => {
+    const name = ht.name.toLowerCase();
+    const slugWords = ht.slug.replace(/-/g, " ");
+    return needle.includes(name) || name.includes(needle) || needle.includes(slugWords);
+  });
+
+  return matched ? matched.id : null;
+}

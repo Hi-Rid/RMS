@@ -14,6 +14,7 @@ import {
   audios,
   refs,
   platforms,
+  appSettings,
 } from "@/db/schema";
 
 export interface RankingRow {
@@ -21,7 +22,7 @@ export interface RankingRow {
   avgRating: number | null;
   medianViews: number;
   sampleSize: number;
-  isSmallSample: boolean; // n < 3 per PRD §12.16
+  isSmallSample: boolean;
 }
 
 export interface OutlierItem {
@@ -44,6 +45,7 @@ export interface CheckpointCurveItem {
 }
 
 export interface InsightData {
+  insightMinSample: number;
   summary: {
     medianViews: number;
     measuredContentsCount: number;
@@ -67,54 +69,126 @@ export interface InsightData {
   curves: CheckpointCurveItem[];
 }
 
-export async function getInsightData(): Promise<InsightData> {
-  try {
-    // 1. Gather all filled snapshot views and ratings
-    const snapshotRows = await db
-      .select({
-        views: snapshots.views,
-        rating: snapshots.rating,
-        contentId: posts.contentId,
-        checkpoint: snapshots.checkpoint,
-        platformId: posts.platformId,
-      })
-      .from(snapshots)
-      .innerJoin(posts, eq(snapshots.postId, posts.id))
-      .where(eq(snapshots.status, "done"));
+function calcMedian(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0
+    ? sorted[mid]
+    : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
 
-    const allViews = snapshotRows
-      .map((s) => s.views)
-      .filter((v): v is number => v !== null)
-      .sort((a, b) => a - b);
+interface DimensionEntry {
+  key: string;
+  contentId: string;
+  finalRating: number | null;
+}
 
-    // Calculate median views
-    let medianViews = 0;
-    if (allViews.length > 0) {
-      const mid = Math.floor(allViews.length / 2);
-      medianViews =
-        allViews.length % 2 !== 0
-          ? allViews[mid]
-          : Math.round((allViews[mid - 1] + allViews[mid]) / 2);
+function buildRankings(
+  entries: DimensionEntry[],
+  contentMaxViews: Map<string, number>,
+  minSample: number
+): RankingRow[] {
+  const buckets = new Map<string, Map<string, number | null>>();
+  for (const e of entries) {
+    if (!e.key) continue;
+    let contentMap = buckets.get(e.key);
+    if (!contentMap) {
+      contentMap = new Map();
+      buckets.set(e.key, contentMap);
+    }
+    if (!contentMap.has(e.contentId)) {
+      contentMap.set(e.contentId, e.finalRating);
+    }
+  }
+
+  const rows: RankingRow[] = [];
+  for (const [name, contentMap] of buckets.entries()) {
+    const sampleSize = contentMap.size;
+    const ratings: number[] = [];
+    const viewsList: number[] = [];
+
+    for (const [cid, rating] of contentMap.entries()) {
+      if (rating !== null) ratings.push(rating);
+      const maxViews = contentMaxViews.get(cid);
+      if (maxViews !== undefined) viewsList.push(maxViews);
     }
 
-    // 2. Count distinct contents with metrics
-    const measuredContentIds = new Set(snapshotRows.map((s) => s.contentId));
-    const measuredContentsCount = measuredContentIds.size;
+    const avgRating =
+      ratings.length > 0
+        ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10
+        : null;
 
-    // 3. Original vs Referenced count
-    const allContents = await db
-      .select({
-        id: contents.id,
-        hasRefs: sql<boolean>`EXISTS (SELECT 1 FROM ${refs} WHERE ${refs.contentId} = ${contents.id})`,
-      })
-      .from(contents)
-      .where(isNull(contents.archivedAt));
+    rows.push({
+      name,
+      avgRating,
+      medianViews: calcMedian(viewsList),
+      sampleSize,
+      isSmallSample: sampleSize < minSample,
+    });
+  }
 
-    const originalContentsCount = allContents.filter((c) => !c.hasRefs).length;
-    const referencedContentsCount = allContents.filter((c) => c.hasRefs).length;
+  return rows.sort((a, b) => {
+    if (a.avgRating !== null && b.avgRating !== null && b.avgRating !== a.avgRating) {
+      return b.avgRating - a.avgRating;
+    }
+    if (a.avgRating !== null && b.avgRating === null) return -1;
+    if (a.avgRating === null && b.avgRating !== null) return 1;
+    if (b.medianViews !== a.medianViews) return b.medianViews - a.medianViews;
+    return b.sampleSize - a.sampleSize;
+  });
+}
 
-    // 4. Unused references and audio counts
-    const [unusedRefsRes, unusedAudiosRes] = await Promise.all([
+export async function getInsightData(): Promise<InsightData> {
+  try {
+    const [
+      [settings],
+      snapshotRows,
+      allContents,
+      unusedRefsRes,
+      unusedAudiosRes,
+      pillarContentRows,
+      sourceContentRows,
+      topOutliers,
+      bottomOutliers,
+      curveContents,
+    ] = await Promise.all([
+      db
+        .select({ insightMinSample: appSettings.insightMinSample })
+        .from(appSettings)
+        .where(eq(appSettings.id, 1))
+        .limit(1)
+        .catch(() => []),
+
+      db
+        .select({
+          views: snapshots.views,
+          rating: snapshots.rating,
+          contentId: posts.contentId,
+        })
+        .from(snapshots)
+        .innerJoin(posts, eq(snapshots.postId, posts.id))
+        .innerJoin(contents, eq(posts.contentId, contents.id))
+        .where(and(eq(snapshots.status, "done"), isNull(contents.archivedAt))),
+
+      db
+        .select({
+          id: contents.id,
+          finalRating: contents.finalRating,
+          formatName: formats.name,
+          hookName: hookTypes.name,
+          seriesName: series.name,
+          audioTitle: audios.title,
+          audioArtist: audios.artist,
+          hasRefs: sql<boolean>`EXISTS (SELECT 1 FROM ${refs} WHERE ${refs.contentId} = ${contents.id} AND ${refs.archivedAt} IS NULL)`,
+        })
+        .from(contents)
+        .leftJoin(formats, eq(contents.formatId, formats.id))
+        .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
+        .leftJoin(series, eq(contents.seriesId, series.id))
+        .leftJoin(audios, eq(contents.audioId, audios.id))
+        .where(isNull(contents.archivedAt)),
+
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(refs)
@@ -125,184 +199,180 @@ export async function getInsightData(): Promise<InsightData> {
             sql`${refs.status} != 'skipped'`
           )
         ),
+
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(audios)
         .where(
           sql`NOT EXISTS (SELECT 1 FROM ${contents} WHERE ${contents.audioId} = ${audios.id} AND ${contents.archivedAt} IS NULL)`
         ),
+
+      db
+        .select({
+          pillarName: pillars.name,
+          contentId: contents.id,
+          finalRating: contents.finalRating,
+        })
+        .from(contentPillars)
+        .innerJoin(pillars, eq(contentPillars.pillarId, pillars.id))
+        .innerJoin(contents, eq(contentPillars.contentId, contents.id))
+        .where(isNull(contents.archivedAt)),
+
+      db
+        .select({
+          handle: sourceAccounts.handle,
+          contentId: contents.id,
+          finalRating: contents.finalRating,
+        })
+        .from(refs)
+        .innerJoin(sourceAccounts, eq(refs.sourceAccountId, sourceAccounts.id))
+        .innerJoin(contents, eq(refs.contentId, contents.id))
+        .where(and(isNull(refs.archivedAt), isNull(contents.archivedAt))),
+
+      db
+        .select({
+          id: contents.id,
+          title: contents.title,
+          finalRating: contents.finalRating,
+          status: contents.status,
+          formatName: formats.name,
+          hookTypeName: hookTypes.name,
+        })
+        .from(contents)
+        .leftJoin(formats, eq(contents.formatId, formats.id))
+        .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
+        .where(and(isNull(contents.archivedAt), sql`${contents.finalRating} IS NOT NULL`))
+        .orderBy(desc(contents.finalRating))
+        .limit(5),
+
+      db
+        .select({
+          id: contents.id,
+          title: contents.title,
+          finalRating: contents.finalRating,
+          status: contents.status,
+          formatName: formats.name,
+          hookTypeName: hookTypes.name,
+        })
+        .from(contents)
+        .leftJoin(formats, eq(contents.formatId, formats.id))
+        .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
+        .where(and(isNull(contents.archivedAt), sql`${contents.finalRating} IS NOT NULL`))
+        .orderBy(asc(contents.finalRating))
+        .limit(5),
+
+      db
+        .select({
+          contentId: contents.id,
+          contentTitle: contents.title,
+          platformName: platforms.name,
+          checkpoint: snapshots.checkpoint,
+          views: snapshots.views,
+        })
+        .from(contents)
+        .innerJoin(posts, eq(posts.contentId, contents.id))
+        .innerJoin(platforms, eq(posts.platformId, platforms.id))
+        .innerJoin(snapshots, eq(snapshots.postId, posts.id))
+        .where(and(isNull(contents.archivedAt), eq(snapshots.status, "done")))
+        .orderBy(desc(contents.createdAt))
+        .limit(30),
     ]);
 
+    const insightMinSample = settings?.insightMinSample ?? 3;
+
+    // Max views per content across completed snapshots + overall snapshot median
+    const contentMaxViews = new Map<string, number>();
+    const allViews: number[] = [];
+    const measuredContentIds = new Set<string>();
+
+    for (const s of snapshotRows) {
+      measuredContentIds.add(s.contentId);
+      if (s.views !== null) {
+        allViews.push(s.views);
+        const prev = contentMaxViews.get(s.contentId);
+        if (prev === undefined || s.views > prev) {
+          contentMaxViews.set(s.contentId, s.views);
+        }
+      }
+    }
+
+    const medianViews = calcMedian(allViews);
+    const measuredContentsCount = measuredContentIds.size;
+    const originalContentsCount = allContents.filter((c) => !c.hasRefs).length;
+    const referencedContentsCount = allContents.filter((c) => c.hasRefs).length;
     const unusedRefsCount = unusedRefsRes[0]?.count || 0;
     const unusedAudiosCount = unusedAudiosRes[0]?.count || 0;
 
-    // 5. Pillar Rankings (PRD §12.16)
-    const pillarRows = await db
-      .select({
-        pillarName: pillars.name,
-        avgRating: sql<number | null>`round(avg(${contents.finalRating})::numeric, 1)`,
-        sampleSize: sql<number>`count(distinct ${contents.id})::int`,
-      })
-      .from(pillars)
-      .innerJoin(contentPillars, eq(contentPillars.pillarId, pillars.id))
-      .innerJoin(contents, eq(contentPillars.contentId, contents.id))
-      .where(isNull(contents.archivedAt))
-      .groupBy(pillars.name)
-      .orderBy(desc(sql`count(distinct ${contents.id})`));
+    // Build all 6 dimension rankings with true avgRating + true medianViews + dynamic minSample
+    const pillarRankings = buildRankings(
+      pillarContentRows.map((r) => ({
+        key: r.pillarName,
+        contentId: r.contentId,
+        finalRating: r.finalRating,
+      })),
+      contentMaxViews,
+      insightMinSample
+    );
 
-    const pillarRankings: RankingRow[] = pillarRows.map((p) => ({
-      name: p.pillarName,
-      avgRating: p.avgRating ? Number(p.avgRating) : null,
-      medianViews: 0,
-      sampleSize: p.sampleSize,
-      isSmallSample: p.sampleSize < 3,
-    }));
+    const formatRankings = buildRankings(
+      allContents
+        .filter((c) => c.formatName)
+        .map((c) => ({
+          key: c.formatName!,
+          contentId: c.id,
+          finalRating: c.finalRating,
+        })),
+      contentMaxViews,
+      insightMinSample
+    );
 
-    // 6. Format Rankings
-    const formatRows = await db
-      .select({
-        formatName: formats.name,
-        avgRating: sql<number | null>`round(avg(${contents.finalRating})::numeric, 1)`,
-        sampleSize: sql<number>`count(distinct ${contents.id})::int`,
-      })
-      .from(formats)
-      .innerJoin(contents, eq(contents.formatId, formats.id))
-      .where(isNull(contents.archivedAt))
-      .groupBy(formats.name)
-      .orderBy(desc(sql`count(distinct ${contents.id})`));
+    const hookRankings = buildRankings(
+      allContents
+        .filter((c) => c.hookName)
+        .map((c) => ({
+          key: c.hookName!,
+          contentId: c.id,
+          finalRating: c.finalRating,
+        })),
+      contentMaxViews,
+      insightMinSample
+    );
 
-    const formatRankings: RankingRow[] = formatRows.map((f) => ({
-      name: f.formatName,
-      avgRating: f.avgRating ? Number(f.avgRating) : null,
-      medianViews: 0,
-      sampleSize: f.sampleSize,
-      isSmallSample: f.sampleSize < 3,
-    }));
+    const sourceRankings = buildRankings(
+      sourceContentRows.map((s) => ({
+        key: `@${s.handle}`,
+        contentId: s.contentId,
+        finalRating: s.finalRating,
+      })),
+      contentMaxViews,
+      insightMinSample
+    );
 
-    // 7. Hook Type Rankings
-    const hookRows = await db
-      .select({
-        hookName: hookTypes.name,
-        avgRating: sql<number | null>`round(avg(${contents.finalRating})::numeric, 1)`,
-        sampleSize: sql<number>`count(distinct ${contents.id})::int`,
-      })
-      .from(hookTypes)
-      .innerJoin(contents, eq(contents.hookTypeId, hookTypes.id))
-      .where(isNull(contents.archivedAt))
-      .groupBy(hookTypes.name)
-      .orderBy(desc(sql`count(distinct ${contents.id})`));
+    const audioRankings = buildRankings(
+      allContents
+        .filter((c) => c.audioTitle)
+        .map((c) => ({
+          key: `${c.audioTitle}${c.audioArtist ? ` - ${c.audioArtist}` : ""}`,
+          contentId: c.id,
+          finalRating: c.finalRating,
+        })),
+      contentMaxViews,
+      insightMinSample
+    );
 
-    const hookRankings: RankingRow[] = hookRows.map((h) => ({
-      name: h.hookName,
-      avgRating: h.avgRating ? Number(h.avgRating) : null,
-      medianViews: 0,
-      sampleSize: h.sampleSize,
-      isSmallSample: h.sampleSize < 3,
-    }));
+    const seriesRankings = buildRankings(
+      allContents
+        .filter((c) => c.seriesName)
+        .map((c) => ({
+          key: c.seriesName!,
+          contentId: c.id,
+          finalRating: c.finalRating,
+        })),
+      contentMaxViews,
+      insightMinSample
+    );
 
-    // 8. Sources Rankings
-    const sourceRows = await db
-      .select({
-        handle: sourceAccounts.handle,
-        avgRating: sql<number | null>`round(avg(${contents.finalRating})::numeric, 1)`,
-        sampleSize: sql<number>`count(distinct ${contents.id})::int`,
-      })
-      .from(sourceAccounts)
-      .innerJoin(refs, eq(refs.sourceAccountId, sourceAccounts.id))
-      .innerJoin(contents, eq(refs.contentId, contents.id))
-      .where(isNull(contents.archivedAt))
-      .groupBy(sourceAccounts.handle)
-      .orderBy(desc(sql`count(distinct ${contents.id})`));
-
-    const sourceRankings: RankingRow[] = sourceRows.map((s) => ({
-      name: `@${s.handle}`,
-      avgRating: s.avgRating ? Number(s.avgRating) : null,
-      medianViews: 0,
-      sampleSize: s.sampleSize,
-      isSmallSample: s.sampleSize < 3,
-    }));
-
-    // 9. Audio Rankings
-    const audioRows = await db
-      .select({
-        title: audios.title,
-        artist: audios.artist,
-        avgRating: sql<number | null>`round(avg(${contents.finalRating})::numeric, 1)`,
-        sampleSize: sql<number>`count(distinct ${contents.id})::int`,
-      })
-      .from(audios)
-      .innerJoin(contents, eq(contents.audioId, audios.id))
-      .where(isNull(contents.archivedAt))
-      .groupBy(audios.title, audios.artist)
-      .orderBy(desc(sql`count(distinct ${contents.id})`));
-
-    const audioRankings: RankingRow[] = audioRows.map((a) => ({
-      name: `${a.title}${a.artist ? ` - ${a.artist}` : ""}`,
-      avgRating: a.avgRating ? Number(a.avgRating) : null,
-      medianViews: 0,
-      sampleSize: a.sampleSize,
-      isSmallSample: a.sampleSize < 3,
-    }));
-
-    // 10. Series Rankings
-    const seriesRows = await db
-      .select({
-        seriesName: series.name,
-        avgRating: sql<number | null>`round(avg(${contents.finalRating})::numeric, 1)`,
-        sampleSize: sql<number>`count(distinct ${contents.id})::int`,
-      })
-      .from(series)
-      .innerJoin(contents, eq(contents.seriesId, series.id))
-      .where(isNull(contents.archivedAt))
-      .groupBy(series.name)
-      .orderBy(desc(sql`count(distinct ${contents.id})`));
-
-    const seriesRankings: RankingRow[] = seriesRows.map((sr) => ({
-      name: sr.seriesName,
-      avgRating: sr.avgRating ? Number(sr.avgRating) : null,
-      medianViews: 0,
-      sampleSize: sr.sampleSize,
-      isSmallSample: sr.sampleSize < 3,
-    }));
-
-    // 11. Top & Bottom Outliers (PRD §12.16 & FR-63)
-    const baseOutlierQuery = db
-      .select({
-        id: contents.id,
-        title: contents.title,
-        finalRating: contents.finalRating,
-        status: contents.status,
-        formatName: formats.name,
-        hookTypeName: hookTypes.name,
-      })
-      .from(contents)
-      .leftJoin(formats, eq(contents.formatId, formats.id))
-      .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
-      .where(and(isNull(contents.archivedAt), sql`${contents.finalRating} IS NOT NULL`));
-
-    const [topOutliers, bottomOutliers] = await Promise.all([
-      baseOutlierQuery.orderBy(desc(contents.finalRating)).limit(5),
-      baseOutlierQuery.orderBy(asc(contents.finalRating)).limit(5),
-    ]);
-
-    // 12. Checkpoint Curve Data (PRD §12.16)
-    const curveContents = await db
-      .select({
-        contentId: contents.id,
-        contentTitle: contents.title,
-        platformName: platforms.name,
-        checkpoint: snapshots.checkpoint,
-        views: snapshots.views,
-      })
-      .from(contents)
-      .innerJoin(posts, eq(posts.contentId, contents.id))
-      .innerJoin(platforms, eq(posts.platformId, platforms.id))
-      .innerJoin(snapshots, eq(snapshots.postId, posts.id))
-      .where(and(isNull(contents.archivedAt), eq(snapshots.status, "done")))
-      .orderBy(desc(contents.createdAt))
-      .limit(30);
-
-    // Group by content + platform
+    // Group checkpoint curves by content + platform
     const curveMap = new Map<string, CheckpointCurveItem>();
     for (const row of curveContents) {
       const key = `${row.contentId}-${row.platformName}`;
@@ -323,6 +393,7 @@ export async function getInsightData(): Promise<InsightData> {
     }
 
     return {
+      insightMinSample,
       summary: {
         medianViews,
         measuredContentsCount,
@@ -340,14 +411,15 @@ export async function getInsightData(): Promise<InsightData> {
         series: seriesRankings,
       },
       outliers: {
-        high: topOutliers,
-        low: bottomOutliers,
+        high: topOutliers.map((o) => ({ ...o, medianViews: contentMaxViews.get(o.id) ?? null })),
+        low: bottomOutliers.map((o) => ({ ...o, medianViews: contentMaxViews.get(o.id) ?? null })),
       },
       curves: Array.from(curveMap.values()),
     };
   } catch (error) {
     console.warn("Failed to get insight data:", error);
     return {
+      insightMinSample: 3,
       summary: {
         medianViews: 0,
         measuredContentsCount: 0,

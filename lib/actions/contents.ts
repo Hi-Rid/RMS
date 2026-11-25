@@ -9,6 +9,7 @@ import {
   contentPillars,
   contentChecklist,
   refs,
+  appSettings,
 } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
@@ -98,17 +99,28 @@ export async function createContent(
       }
     }
 
-    // 4. Insert default checklist items
-    const defaultChecklist = [
-      "Validate angle & research hook",
-      "Draft script & shot list",
-      "Record primary footage & b-roll",
-      "Edit, caption & polish audio",
-      "Ready to post & distribute",
+    // 4. Insert default checklist items from app_settings
+    const [settingsRow] = await tx
+      .select({ defaultChecklist: appSettings.defaultChecklist })
+      .from(appSettings)
+      .where(eq(appSettings.id, 1))
+      .limit(1);
+
+    const fallbackChecklist = [
+      "Script / outline",
+      "Shoot or draw",
+      "Edit",
+      "Cover",
+      "Caption and hashtags",
+      "Audio checked",
     ];
+    const checklistSteps =
+      settingsRow?.defaultChecklist && settingsRow.defaultChecklist.length > 0
+        ? settingsRow.defaultChecklist
+        : fallbackChecklist;
 
     await tx.insert(contentChecklist).values(
-      defaultChecklist.map((label, idx) => ({
+      checklistSteps.map((label, idx) => ({
         contentId,
         label,
         isDone: false,
@@ -158,6 +170,18 @@ export async function updateContent(
   const { id, pillarIds, ...updates } = parsed.data;
 
   return await withTx(async (tx) => {
+    const [existing] = await tx
+      .select({
+        title: contents.title,
+        hookText: contents.hookText,
+        notes: contents.notes,
+        changesNote: contents.changesNote,
+        tags: contents.tags,
+      })
+      .from(contents)
+      .where(eq(contents.id, id))
+      .limit(1);
+
     const valuesToUpdate: Record<string, any> = {
       updatedAt: sql`now()`,
     };
@@ -174,6 +198,19 @@ export async function updateContent(
     if (updates.tags !== undefined) valuesToUpdate.tags = updates.tags;
     if (updates.finalRating !== undefined) valuesToUpdate.finalRating = updates.finalRating;
     if (updates.finalRatingNote !== undefined) valuesToUpdate.finalRatingNote = updates.finalRatingNote;
+
+    if (existing) {
+      const mergedTitle = updates.title !== undefined ? updates.title.trim() : existing.title;
+      const mergedHook = updates.hookText !== undefined ? updates.hookText : existing.hookText || "";
+      const mergedNotes = updates.notes !== undefined ? updates.notes : existing.notes || "";
+      const mergedChanges =
+        updates.changesNote !== undefined ? updates.changesNote : existing.changesNote || "";
+      const mergedTags = updates.tags !== undefined ? updates.tags : existing.tags || [];
+      valuesToUpdate.searchText = [mergedTitle, mergedHook, mergedNotes, mergedChanges, ...mergedTags]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+    }
 
     await tx.update(contents).set(valuesToUpdate).where(eq(contents.id, id));
 

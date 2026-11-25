@@ -167,14 +167,14 @@ export function InsightClient({ initialData, hasGeminiKey }: InsightClientProps)
           </span>
           <div className="flex items-center gap-2">
             <Link
-              href="/references?filter=unused"
+              href="/references?unused=1"
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-secondary hover:bg-secondary/80 text-xs font-mono text-foreground font-bold transition-colors"
             >
               <span>{summary.unusedRefsCount} Refs</span>
               <ArrowUpRight className="size-3 text-muted-foreground" />
             </Link>
             <Link
-              href="/audio?filter=unused"
+              href="/audio?unused=1"
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-secondary hover:bg-secondary/80 text-xs font-mono text-foreground font-bold transition-colors"
             >
               <span>{summary.unusedAudiosCount} Audios</span>
@@ -196,12 +196,12 @@ export function InsightClient({ initialData, hasGeminiKey }: InsightClientProps)
                 Dimension Rankings
               </CardTitle>
               <CardDescription className="text-xs text-muted-foreground">
-                Ranked by average content score & sample size (sample size threshold n &ge; 3)
+                Ranked by average content score &amp; median views (sample size threshold n &ge; {initialData.insightMinSample})
               </CardDescription>
             </div>
             <div className="text-[11px] font-mono text-muted-foreground flex items-center gap-1.5">
               <Info className="size-3.5" />
-              <span>Rows with n &lt; 3 marked as small sample</span>
+              <span>Rows with n &lt; {initialData.insightMinSample} marked as small sample</span>
             </div>
           </div>
         </CardHeader>
@@ -608,6 +608,7 @@ function RankingTable({ rows, dimension }: { rows: RankingRow[]; dimension: stri
             <th className="py-2.5 px-3">#</th>
             <th className="py-2.5 px-3">{dimension}</th>
             <th className="py-2.5 px-3 text-right">Avg Rating</th>
+            <th className="py-2.5 px-3 text-right">Median Views</th>
             <th className="py-2.5 px-3 text-right">Sample (n)</th>
             <th className="py-2.5 px-3">Status</th>
           </tr>
@@ -629,6 +630,9 @@ function RankingTable({ rows, dimension }: { rows: RankingRow[]; dimension: stri
               <td className="py-2.5 px-3 text-right font-mono font-bold text-foreground">
                 {row.avgRating ? `★ ${row.avgRating.toFixed(1)}` : "—"}
               </td>
+              <td className="py-2.5 px-3 text-right font-mono text-foreground">
+                {row.medianViews > 0 ? row.medianViews.toLocaleString() : "—"}
+              </td>
               <td className="py-2.5 px-3 text-right font-mono text-muted-foreground">
                 n={row.sampleSize}
               </td>
@@ -636,7 +640,7 @@ function RankingTable({ rows, dimension }: { rows: RankingRow[]; dimension: stri
                 {row.isSmallSample ? (
                   <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
                     <AlertTriangle className="size-2.5" />
-                    Small sample (n&lt;3)
+                    Small sample
                   </span>
                 ) : (
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">

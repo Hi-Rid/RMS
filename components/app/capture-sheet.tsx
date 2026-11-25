@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { saveCapture } from "@/lib/actions/references";
 import { aiBedahReference } from "@/lib/actions/ai";
+import { matchHookTypeId } from "@/lib/domain/normalize";
 import { toast } from "sonner";
 import { Loader2, ExternalLink, Sparkles } from "lucide-react";
 import type { ReferenceListItem, MasterData } from "@/lib/queries/references";
@@ -70,6 +71,8 @@ export function CaptureSheet({
         (prev) =>
           `${prev ? prev + "\n\n" : ""}Key Insight: ${res.data.keyTakeaway}\n\nAdaptation Ideas:\n- ${res.data.adaptIdeas.join("\n- ")}`
       );
+      const matchedHookId = matchHookTypeId(res.data.hookType, masterData?.hookTypes || []);
+      if (matchedHookId) setHookTypeId(matchedHookId);
       if (res.data.suggestedTags?.length) {
         setTagsInput(res.data.suggestedTags.join(", "));
       }

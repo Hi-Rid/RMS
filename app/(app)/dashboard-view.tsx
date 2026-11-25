@@ -342,11 +342,18 @@ export function DashboardView({ data, ownerEmail }: DashboardViewProps) {
                       <span className="text-xs font-mono font-bold text-foreground group-hover:underline line-clamp-1">
                         {c.title}
                       </span>
-                      {c.formatName && (
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-foreground text-background uppercase tracking-wider">
-                          {c.formatName}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {c.checklistTotal > 0 && (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-background border border-border text-muted-foreground">
+                            {c.checklistDone}/{c.checklistTotal}
+                          </span>
+                        )}
+                        {c.formatName && (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-foreground text-background uppercase tracking-wider">
+                            {c.formatName}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </Link>
                 ))}

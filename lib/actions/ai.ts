@@ -2,9 +2,113 @@
 
 import { z } from "zod";
 import { generateText, Output } from "ai";
+import { db } from "@/lib/db";
+import { aiUsage } from "@/db/schema";
 import { getGoogleClient, runWithModelFallback } from "@/lib/ai/client";
+import { getAppSettings } from "@/lib/queries/settings";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";
+
+type AiFeature = "bedah" | "hooks" | "script" | "insight";
+
+async function executeWithAiGuard<T>(
+  feature: AiFeature,
+  runner: (ctx: {
+    model: ReturnType<NonNullable<ReturnType<typeof getGoogleClient>>>;
+    langInstruction: string;
+  }) => Promise<{ data: T; inputTokens?: number; outputTokens?: number }>
+): Promise<ActionResult<T>> {
+  await requireActionOwner();
+
+  const settings = await getAppSettings();
+  if (!settings.aiEnabled) {
+    return fail(
+      "ai_disabled",
+      "AI features are turned off. Enable them in Settings -> AI Automation."
+    );
+  }
+
+  const google = getGoogleClient();
+  if (!google) {
+    return fail(
+      "ai_disabled",
+      "Google Gemini API key is not configured. Add GOOGLE_GENERATIVE_AI_API_KEY in .env.local."
+    );
+  }
+
+  if (settings.aiDailyCap > 0 && settings.aiUsedToday >= settings.aiDailyCap) {
+    await db
+      .insert(aiUsage)
+      .values({
+        feature,
+        provider: settings.aiProvider || "google",
+        model: settings.aiTextModel || "gemini-flash-lite-latest",
+        status: "blocked_cap",
+        error: `Daily cap reached (${settings.aiUsedToday}/${settings.aiDailyCap})`,
+      })
+      .catch(() => {});
+
+    return fail(
+      "ai_cap_reached",
+      `Daily AI limit reached (${settings.aiUsedToday}/${settings.aiDailyCap}). Increase cap in Settings.`
+    );
+  }
+
+  const langInstruction =
+    settings.aiOutputLanguage === "en"
+      ? "Write the ENTIRE output strictly in natural, sharp English suitable for a solo content creator."
+      : "Tulis SELURUH output MENGGUNAKAN BAHASA INDONESIA yang kasual, tajam, dan aplikatif untuk solo content creator.";
+
+  const start = Date.now();
+  let usedModel = settings.aiTextModel || "gemini-flash-lite-latest";
+
+  try {
+    const result = await runWithModelFallback(async (model, modelName) => {
+      usedModel = modelName;
+      return await runner({ model, langInstruction });
+    }, settings.aiTextModel);
+
+    const latencyMs = Date.now() - start;
+    await db
+      .insert(aiUsage)
+      .values({
+        feature,
+        provider: settings.aiProvider || "google",
+        model: usedModel,
+        status: "ok",
+        inputTokens: result.inputTokens ?? null,
+        outputTokens: result.outputTokens ?? null,
+        latencyMs,
+      })
+      .catch(() => {});
+
+    return ok(result.data);
+  } catch (err: unknown) {
+    const latencyMs = Date.now() - start;
+    const msg = err instanceof Error ? err.message : String(err);
+    const isRateLimit = msg.includes("429") || msg.toLowerCase().includes("quota");
+
+    await db
+      .insert(aiUsage)
+      .values({
+        feature,
+        provider: settings.aiProvider || "google",
+        model: usedModel,
+        status: isRateLimit ? "rate_limited" : "error",
+        latencyMs,
+        error: msg.slice(0, 400),
+      })
+      .catch(() => {});
+
+    console.error(`AI ${feature} error:`, err);
+    return fail(
+      isRateLimit ? "rate_limited" : "ai_failed",
+      isRateLimit
+        ? "AI provider rate limit hit. Please try again in a moment."
+        : "Failed to process AI request. Check your Gemini API key or quota."
+    );
+  }
+}
 
 export interface BedahResult {
   hookText: string;
@@ -26,48 +130,45 @@ const bedahSchema = z.object({
 export async function aiBedahReference(
   input: z.infer<typeof bedahSchema>
 ): Promise<ActionResult<BedahResult>> {
-  await requireActionOwner();
-
-  const google = getGoogleClient();
-  if (!google) {
-    return fail(
-      "ai_disabled",
-      "Google Gemini API key is not configured. Please add your free key in .env.local (GOOGLE_GENERATIVE_AI_API_KEY) or in Settings."
-    );
+  const parsed = bedahSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid input");
   }
 
-  try {
-    const output = await runWithModelFallback(async (model) => {
-      const res = await generateText({
-        model,
-        output: Output.object({
-          schema: z.object({
-            hookText: z.string().describe("Kalimat hook 3 detik pertama yang memikat audiens dalam Bahasa Indonesia"),
-            hookType: z.string().describe("Tipe hook psikologis (misal: Curiosity Gap, Masalah Relate, Klaim Berani, Kontrarian)"),
-            visualNotes: z.string().describe("Catatan visual styling, framing, transisi, pacing, atau B-roll dalam Bahasa Indonesia"),
-            keyTakeaway: z.string().describe("Pelajaran inti mengapa konten ini berhasil memikat penonton dalam Bahasa Indonesia"),
-            adaptIdeas: z.array(z.string()).min(3).max(4).describe("3 ide adaptasi original yang berbeda dari sumber dalam Bahasa Indonesia"),
-            suggestedTags: z.array(z.string()).min(2).max(5).describe("Tag kategori topik yang relevan dalam Bahasa Indonesia"),
-          }),
+  return executeWithAiGuard("bedah", async ({ model, langInstruction }) => {
+    const res = await generateText({
+      model,
+      output: Output.object({
+        schema: z.object({
+          hookText: z.string().describe("Opening 3-second hook that captures viewer attention"),
+          hookType: z
+            .string()
+            .describe("Hook archetype (e.g. POV, Curiosity gap, Bold statement, Stop doing this, Question)"),
+          visualNotes: z.string().describe("Visual styling, framing, transitions, pacing, or B-roll cues"),
+          keyTakeaway: z.string().describe("Core psychological reason why this content succeeded"),
+          adaptIdeas: z
+            .array(z.string())
+            .min(3)
+            .max(4)
+            .describe("3 original adaptation ideas distinct from the source"),
+          suggestedTags: z.array(z.string()).min(2).max(5).describe("Relevant topic category tags"),
         }),
-        prompt: `You are an expert short-form video content strategist and hook breakdown specialist (Reels, Shorts, TikTok).
+      }),
+      prompt: `You are an expert short-form video content strategist and hook breakdown specialist (Reels, Shorts, TikTok).
 Perform an in-depth breakdown of this reference content:
-Platform: ${input.platform || "Social Media"}
-Content/URL: "${input.text}"
+Platform: ${parsed.data.platform || "Social Media"}
+Content/URL: "${parsed.data.text}"
 
-WAJIB DIPATUHI:
-Tulis SELURUH hasil bedah (hookText, hookType, visualNotes, keyTakeaway, adaptIdeas, suggestedTags) MENGGUNAKAN BAHASA INDONESIA yang kasual, tajam, dan aplikatif untuk content creator solo.
-Berikan analisis yang fokus pada orisinalitas dan cara mengadaptasi ide tersebut tanpa menjiplak.`,
-      });
-
-      return res.output;
+${langInstruction}
+Focus on originality and practical ways to adapt the concept without copying.`,
     });
 
-    return ok(output);
-  } catch (err: unknown) {
-    console.error("AI Bedah error:", err);
-    return fail("ai_failed", "Failed to process AI breakdown. Please check your Gemini API key or quota.");
-  }
+    return {
+      data: res.output,
+      inputTokens: res.usage?.inputTokens,
+      outputTokens: res.usage?.outputTokens,
+    };
+  });
 }
 
 const hooksSchema = z.object({
@@ -88,48 +189,42 @@ export interface GeneratedHook {
 export async function aiGenerateHooks(
   input: z.infer<typeof hooksSchema>
 ): Promise<ActionResult<{ hooks: GeneratedHook[] }>> {
-  await requireActionOwner();
-
-  const google = getGoogleClient();
-  if (!google) {
-    return fail(
-      "ai_disabled",
-      "Google Gemini API key is not configured. Please add your free key in .env.local (GOOGLE_GENERATIVE_AI_API_KEY)."
-    );
+  const parsed = hooksSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid input");
   }
 
-  try {
-    const output = await runWithModelFallback(async (model) => {
-      const res = await generateText({
-        model,
-        output: Output.object({
-          schema: z.object({
-            hooks: z.array(
+  return executeWithAiGuard("hooks", async ({ model, langInstruction }) => {
+    const res = await generateText({
+      model,
+      output: Output.object({
+        schema: z.object({
+          hooks: z
+            .array(
               z.object({
-                text: z.string().describe("Kalimat hook pembuka 1-2 kalimat tajam (maksimal 14 kata) dalam Bahasa Indonesia"),
-                archetype: z.string().describe("Sudut pandang hook: Rasa Ingin Tahu, Kontrarian, Masalah Relate, Pertanyaan, dsb."),
-                whyItWorks: z.string().describe("Alasan psikologis mengapa hook ini langsung menghentikan scroll dalam Bahasa Indonesia"),
+                text: z.string().describe("Punchy opening hook (1-2 sentences, max 14 words)"),
+                archetype: z.string().describe("Hook angle (Curiosity, Contrarian, Mistake, Relatable, Question)"),
+                whyItWorks: z.string().describe("Brief psychological trigger explaining why this stops the scroll"),
               })
-            ).min(5).max(7),
-          }),
+            )
+            .min(5)
+            .max(7),
         }),
-        prompt: `Buat 6 variasi hook pembuka video pendek (Reels, TikTok, Shorts) yang langsung menghentikan scroll penonton.
-Topik: "${input.topic}"
-Pilar Konten: "${input.pillar || "General"}"
-Format: "${input.format || "Short-form Video"}"
+      }),
+      prompt: `Generate 6 scroll-stopping opening hooks for short-form video (Reels, TikTok, Shorts).
+Topic: "${parsed.data.topic}"
+Content Pillar: "${parsed.data.pillar || "General"}"
+Format: "${parsed.data.format || "Short-form Video"}"
 
-WAJIB DIPATUHI:
-Tulis seluruh hook dan alasan psikologisnya dalam BAHASA INDONESIA yang kasual, percaya diri, dan alami untuk creator.`,
-      });
-
-      return res.output;
+${langInstruction}`,
     });
 
-    return ok(output);
-  } catch (err: unknown) {
-    console.error("AI Generate Hooks error:", err);
-    return fail("ai_failed", "Failed to generate hooks with AI.");
-  }
+    return {
+      data: res.output,
+      inputTokens: res.usage?.inputTokens,
+      outputTokens: res.usage?.outputTokens,
+    };
+  });
 }
 
 const scriptSchema = z.object({
@@ -144,53 +239,47 @@ const scriptSchema = z.object({
 export async function aiDraftScript(
   input: z.infer<typeof scriptSchema>
 ): Promise<ActionResult<{ script: string }>> {
-  await requireActionOwner();
-
-  const google = getGoogleClient();
-  if (!google) {
-    return fail(
-      "ai_disabled",
-      "Google Gemini API key is not configured. Please add your free key in .env.local."
-    );
+  const parsed = scriptSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid input");
   }
 
-  try {
-    const output = await runWithModelFallback(async (model) => {
-      const { text } = await generateText({
-        model,
-        prompt: `Buat naskah produksi video pendek (45-60 detik) berdurasi tinggi dan ber-retensi kuat untuk content creator solo:
-Judul Konten: "${input.title}"
-Kalimat Hook Pembuka: "${input.hookText || "Rancang hook pembuka paling memikat"}"
-Catatan Konsep: "${input.notes || "None"}"
+  return executeWithAiGuard("script", async ({ model, langInstruction }) => {
+    const res = await generateText({
+      model,
+      prompt: `Create a high-retention 45-60 second short-form video production script for a solo creator:
+Title: "${parsed.data.title}"
+Opening Hook: "${parsed.data.hookText || "Craft the strongest opening hook"}"
+Concept Notes: "${parsed.data.notes || "None"}"
 
-WAJIB DIPATUHI: Tulis naskah dalam BAHASA INDONESIA yang kasual, percaya diri, dan cepat.
-Bagi naskah menjadi 4 blok produksi yang jelas:
-1. [00:00 - 00:03] THE HOOK: Kalimat hook pembuka yang punchy + arahan visual framing cepat
-2. [00:03 - 00:15] THE PROBLEM / TENSION: Masalah inti penonton + mengapa harus peduli
-3. [00:15 - 00:45] THE INSIGHT / VALUE: Solusi praktis (2-3 poin tajam) + arahan visual B-roll / aksi
-4. [00:45 - 00:60] THE PAYOFF & CTA: Takeaway penutup tajam + ajakan interaksi (komen/save)`,
-      });
-
-      return { script: text };
+${langInstruction}
+Structure the script into 4 clear production blocks:
+1. [00:00 - 00:03] THE HOOK: Punchy opening line + fast visual framing cue
+2. [00:03 - 00:15] THE PROBLEM / TENSION: Core viewer tension + why it matters
+3. [00:15 - 00:45] THE INSIGHT / VALUE: 2-3 practical points + B-roll visual directions
+4. [00:45 - 00:60] THE PAYOFF & CTA: Sharp closing takeaway + save/comment call to action`,
     });
 
-    return ok(output);
-  } catch (err: unknown) {
-    console.error("AI Draft Script error:", err);
-    return fail("ai_failed", "Failed to draft script with AI.");
-  }
+    return {
+      data: { script: res.text },
+      inputTokens: res.usage?.inputTokens,
+      outputTokens: res.usage?.outputTokens,
+    };
+  });
 }
 
 const explainPatternSchema = z.object({
   group: z.enum(["high", "low", "all"]).default("high"),
-  items: z.array(
-    z.object({
-      title: z.string(),
-      finalRating: z.number().nullable().optional(),
-      formatName: z.string().nullable().optional(),
-      hookTypeName: z.string().nullable().optional(),
-    })
-  ).min(1, "At least one content item is required"),
+  items: z
+    .array(
+      z.object({
+        title: z.string(),
+        finalRating: z.number().nullable().optional(),
+        formatName: z.string().nullable().optional(),
+        hookTypeName: z.string().nullable().optional(),
+      })
+    )
+    .min(1, "At least one content item is required"),
 });
 
 export interface ExplainPatternResult {
@@ -205,51 +294,41 @@ export interface ExplainPatternResult {
 export async function aiExplainPattern(
   input: z.infer<typeof explainPatternSchema>
 ): Promise<ActionResult<ExplainPatternResult>> {
-  await requireActionOwner();
-
-  const google = getGoogleClient();
-  if (!google) {
-    return fail(
-      "ai_disabled",
-      "Google Gemini API key is not configured. Please add your free key in .env.local."
-    );
+  const parsed = explainPatternSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid input");
   }
 
-  try {
-    const output = await runWithModelFallback(async (model) => {
-      const res = await generateText({
-        model,
-        output: Output.object({
-          schema: z.object({
-            summary: z.string().describe("Concise 1-2 sentence pattern summary across the outlier contents"),
-            keyObservations: z
-              .array(z.string())
-              .min(2)
-              .max(4)
-              .describe("Bullet points of observable commonalities in hook types, formats, or themes"),
-            caveats: z
-              .string()
-              .describe("Sample size and correlation vs causation caveat note"),
-          }),
+  return executeWithAiGuard("insight", async ({ model, langInstruction }) => {
+    const res = await generateText({
+      model,
+      output: Output.object({
+        schema: z.object({
+          summary: z.string().describe("Concise 1-2 sentence pattern summary across the outlier contents"),
+          keyObservations: z
+            .array(z.string())
+            .min(2)
+            .max(4)
+            .describe("Observable commonalities in hook types, formats, or themes"),
+          caveats: z.string().describe("Sample size and correlation vs causation caveat note"),
         }),
-        prompt: `Anda adalah analis strategi konten video pendek yang menganalisis kelompok outlier (${input.group === "high" ? "top performers" : "underperformers"}).
-Daftar konten:
-${JSON.stringify(input.items, null, 2)}
+      }),
+      prompt: `Analyze these short-form content outliers (${
+        parsed.data.group === "high" ? "top performers" : "underperformers"
+      }):
+${JSON.stringify(parsed.data.items, null, 2)}
 
-Aturan:
-1. Tulis seluruh analisis dalam BAHASA INDONESIA yang lugas, tajam, dan objektif.
-2. JANGAN membuat klaim kausal mutlak (gunakan istilah seperti 'cenderung memiliki' atau 'korelasi teramati', bukan 'menyebabkan').
-3. Soroti kesamaan pola pada arketipe hook, format, atau gaya penyampaian.
-4. Sebutkan keterbatasan ukuran sampel secara eksplisit.`,
-      });
-
-      return res.output;
+Rules:
+1. ${langInstruction}
+2. Do NOT make definitive causal claims (use observed correlation phrasing, never claim X caused Y).
+3. Highlight patterns in hook type, format, or presentation style.
+4. Explicitly state sample size limitations.`,
     });
 
-    return ok(output);
-  } catch (err: unknown) {
-    console.error("AI Explain Pattern error:", err);
-    return fail("ai_failed", "Failed to analyze outlier patterns with AI.");
-  }
+    return {
+      data: res.output,
+      inputTokens: res.usage?.inputTokens,
+      outputTokens: res.usage?.outputTokens,
+    };
+  });
 }
-
