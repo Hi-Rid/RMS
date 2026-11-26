@@ -5,6 +5,9 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/app/status-badge";
+import { SelectField } from "@/components/app/select-field";
+import { ConfirmDialog } from "@/components/app/confirm-dialog";
+import { useUnsavedChanges } from "@/lib/hooks/use-unsaved-changes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,17 +20,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import {
   ArrowLeft,
   CheckSquare,
@@ -46,6 +38,7 @@ import {
   Sparkles,
   Archive,
   RotateCcw,
+  X,
 } from "lucide-react";
 import {
   updateContent,
@@ -75,6 +68,13 @@ interface ContentStudioClientProps {
   studioOptions: StudioMasterOptions;
 }
 
+function getLocalDatetimeInputValue(): string {
+  const d = new Date();
+  const offset = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - offset * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
 export function ContentStudioClient({
   content,
   masterData,
@@ -102,6 +102,7 @@ export function ContentStudioClient({
   // Checklist state
   const [checklist, setChecklist] = useState(content.checklist);
   const [newChecklistText, setNewChecklistText] = useState("");
+  const [deleteStepTarget, setDeleteStepTarget] = useState<{ id: string; label: string } | null>(null);
 
   // Reference linking state
   const linkedRefIds = React.useMemo(
@@ -114,23 +115,37 @@ export function ContentStudioClient({
   );
   const [linkRefId, setLinkRefId] = useState(unlinkedRefs[0]?.id || "");
 
+  // Posted platforms tracking to avoid picking an already-posted platform by accident
+  const postedPlatformIds = React.useMemo(
+    () => new Set(content.posts.map((p) => p.platformId)),
+    [content.posts]
+  );
+  const defaultNextPlatformId = React.useMemo(() => {
+    const unposted = masterData.platforms.find((p) => !postedPlatformIds.has(p.id));
+    return unposted?.id || masterData.platforms[0]?.id || "";
+  }, [masterData.platforms, postedPlatformIds]);
+
   // Add post dialog state
   const [isAddPostOpen, setIsAddPostOpen] = useState(false);
-  const [postPlatformId, setPostPlatformId] = useState(masterData.platforms[0]?.id || "");
+  const [postPlatformId, setPostPlatformId] = useState(defaultNextPlatformId);
   const [postUrl, setPostUrl] = useState("");
   const [postCaption, setPostCaption] = useState("");
+  const [postDateTime, setPostDateTime] = useState(getLocalDatetimeInputValue);
   const [selectedSnippetId, setSelectedSnippetId] = useState("");
   const [isGeneratingCaption, setIsGeneratingCaption] = useState(false);
+  const [deletePostTargetId, setDeletePostTargetId] = useState<string | null>(null);
 
   // Final rating state
   const [rating, setRating] = useState<number | null>(content.finalRating);
   const [finalRatingNote, setFinalRatingNote] = useState(content.finalRatingNote || "");
 
-  // AI Assistant states
+  // AI & safety confirmation states
   const [isGeneratingHooks, setIsGeneratingHooks] = useState(false);
   const [isDraftingScript, setIsDraftingScript] = useState(false);
   const [hookOptions, setHookOptions] = useState<GeneratedHook[]>([]);
   const [isHooksModalOpen, setIsHooksModalOpen] = useState(false);
+  const [deleteContentDialogOpen, setDeleteContentDialogOpen] = useState(false);
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
 
   React.useEffect(() => {
     setChecklist(content.checklist);
@@ -141,6 +156,69 @@ export function ContentStudioClient({
       setLinkRefId(unlinkedRefs[0]?.id || "");
     }
   }, [unlinkedRefs, linkRefId]);
+
+  React.useEffect(() => {
+    if (isAddPostOpen) {
+      setPostPlatformId(defaultNextPlatformId);
+      setPostDateTime(getLocalDatetimeInputValue());
+    }
+  }, [isAddPostOpen, defaultNextPlatformId]);
+
+  const serverSignature = React.useMemo(
+    () =>
+      JSON.stringify({
+        title: content.title,
+        formatId: content.format?.id || "",
+        seriesId: content.series?.id || "",
+        hookTypeId: content.hookType?.id || "",
+        audioId: content.audio?.id || "",
+        pillars: content.pillars.map((p) => p.id),
+        hookText: content.hookText || "",
+        notes: content.notes || "",
+        changesNote: content.changesNote || "",
+        tagsInput: (content.tags || []).join(", "),
+        workUrl: content.workUrl || "",
+        plannedFor: content.plannedFor || "",
+        finalRatingNote: content.finalRatingNote || "",
+      }),
+    [content]
+  );
+
+  const isDirty = React.useMemo(() => {
+    const cur = JSON.stringify({
+      title,
+      formatId,
+      seriesId,
+      hookTypeId,
+      audioId,
+      pillars: selectedPillars,
+      hookText,
+      notes,
+      changesNote,
+      tagsInput,
+      workUrl,
+      plannedFor,
+      finalRatingNote,
+    });
+    return cur !== serverSignature;
+  }, [
+    title,
+    formatId,
+    seriesId,
+    hookTypeId,
+    audioId,
+    selectedPillars,
+    hookText,
+    notes,
+    changesNote,
+    tagsInput,
+    workUrl,
+    plannedFor,
+    finalRatingNote,
+    serverSignature,
+  ]);
+
+  useUnsavedChanges(isDirty);
 
   const togglePillar = (id: string) => {
     setSelectedPillars((prev) =>
@@ -153,19 +231,23 @@ export function ContentStudioClient({
       new Set(
         raw
           .split(",")
-          .map((t) => t.trim())
+          .map((t) => t.trim().replace(/^#/, ""))
           .filter(Boolean)
       )
     ).slice(0, 30);
 
+  const parsedTags = React.useMemo(() => parseTags(tagsInput), [tagsInput]);
+  const liveFormat = masterData.formats.find((f) => f.id === formatId) || null;
+  const liveSeries = studioOptions.series.find((s) => s.id === seriesId) || null;
+  const liveHookType = masterData.hookTypes.find((h) => h.id === hookTypeId) || null;
+  const liveAudio = studioOptions.audios.find((a) => a.id === audioId) || content.audio || null;
+  const livePillars = masterData.pillars.filter((p) => selectedPillars.includes(p.id));
+
   const handleGenerateHooks = async () => {
     setIsGeneratingHooks(true);
     try {
-      const selectedFormatName =
-        masterData.formats.find((f) => f.id === formatId)?.name || content.format?.name;
-      const primaryPillarName =
-        masterData.pillars.find((p) => p.id === selectedPillars[0])?.name ||
-        content.pillars[0]?.name;
+      const selectedFormatName = liveFormat?.name;
+      const primaryPillarName = livePillars[0]?.name;
 
       const res = await aiGenerateHooks({
         topic: title,
@@ -188,13 +270,22 @@ export function ContentStudioClient({
   };
 
   const handleApplyHook = (hook: GeneratedHook) => {
+    const prevHook = hookText;
     setHookText(hook.text);
     setIsHooksModalOpen(false);
-    toast.success(`Selected hook: "${hook.text}"`);
+    toast.success(`Selected hook applied`, {
+      action: prevHook.trim()
+        ? {
+            label: "Undo",
+            onClick: () => setHookText(prevHook),
+          }
+        : undefined,
+    });
   };
 
   const handleDraftScript = async () => {
     setIsDraftingScript(true);
+    const previousNotes = notes;
     try {
       const res = await aiDraftScript({
         title,
@@ -208,7 +299,14 @@ export function ContentStudioClient({
       }
 
       setNotes(res.data.script);
-      toast.success("AI Script drafted! Check the editor below.");
+      toast.success("AI Script drafted!", {
+        action: previousNotes.trim()
+          ? {
+              label: "Undo Replace",
+              onClick: () => setNotes(previousNotes),
+            }
+          : undefined,
+      });
     } catch {
       toast.error("Failed to draft script");
     } finally {
@@ -218,6 +316,7 @@ export function ContentStudioClient({
 
   const handleGenerateCaption = async () => {
     setIsGeneratingCaption(true);
+    const previousCaption = postCaption;
     try {
       const platformName =
         masterData.platforms.find((p) => p.id === postPlatformId)?.name || "Instagram Reels";
@@ -234,7 +333,14 @@ export function ContentStudioClient({
       }
 
       setPostCaption(res.data.caption);
-      toast.success("AI caption drafted");
+      toast.success("AI caption drafted", {
+        action: previousCaption.trim()
+          ? {
+              label: "Undo Replace",
+              onClick: () => setPostCaption(previousCaption),
+            }
+          : undefined,
+      });
     } catch {
       toast.error("Failed to generate caption");
     } finally {
@@ -256,10 +362,16 @@ export function ContentStudioClient({
       return;
     }
 
+    const cleanWorkUrl = workUrl.trim();
+    if (cleanWorkUrl && !/^https?:\/\/.+/i.test(cleanWorkUrl)) {
+      toast.error("Work Asset URL must start with http:// or https://");
+      return;
+    }
+
     startTransition(async () => {
       const res = await updateContent({
         id: content.id,
-        title,
+        title: title.trim(),
         formatId: formatId || null,
         seriesId: seriesId || null,
         hookTypeId: hookTypeId || null,
@@ -269,7 +381,7 @@ export function ContentStudioClient({
         notes,
         changesNote,
         tags: parseTags(tagsInput),
-        workUrl: workUrl || null,
+        workUrl: cleanWorkUrl || null,
         plannedFor: plannedFor || null,
         finalRating: rating,
         finalRatingNote,
@@ -291,18 +403,25 @@ export function ContentStudioClient({
     );
 
     startTransition(async () => {
-      await toggleChecklistItem({ id, isDone: next });
+      const res = await toggleChecklistItem({ id, isDone: next });
+      if (!res.ok) {
+        setChecklist((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, isDone: current } : item))
+        );
+        toast.error(res.error.message || "Failed to update checklist item");
+      }
     });
   };
 
   const handleAddChecklist = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newChecklistText.trim()) return;
+    const clean = newChecklistText.trim();
+    if (!clean || isPending) return;
 
     startTransition(async () => {
       const res = await addChecklistItem({
         contentId: content.id,
-        label: newChecklistText.trim(),
+        label: clean,
       });
       if (res.ok) {
         setChecklist((prev) => [
@@ -321,11 +440,17 @@ export function ContentStudioClient({
     });
   };
 
-  const handleDeleteChecklistItem = (id: string) => {
-    setChecklist((prev) => prev.filter((item) => item.id !== id));
-    startTransition(async () => {
-      await deleteChecklistItem({ id, contentId: content.id });
-    });
+  const handleConfirmDeleteChecklist = async () => {
+    if (!deleteStepTarget) return;
+    const targetId = deleteStepTarget.id;
+    const res = await deleteChecklistItem({ id: targetId, contentId: content.id });
+    if (res.ok) {
+      setChecklist((prev) => prev.filter((item) => item.id !== targetId));
+      setDeleteStepTarget(null);
+      toast.success("Checklist step removed");
+    } else {
+      toast.error(res.error.message || "Failed to remove checklist step");
+    }
   };
 
   const handleLinkRef = () => {
@@ -360,13 +485,24 @@ export function ContentStudioClient({
       return;
     }
 
+    const cleanPostUrl = postUrl.trim();
+    if (cleanPostUrl && !/^https?:\/\/.+/i.test(cleanPostUrl)) {
+      toast.error("Post URL must start with http:// or https://");
+      return;
+    }
+
+    const parsedDate = postDateTime ? new Date(postDateTime) : new Date();
+    const postedIso = Number.isNaN(parsedDate.getTime())
+      ? new Date().toISOString()
+      : parsedDate.toISOString();
+
     startTransition(async () => {
       const res = await addPost({
         contentId: content.id,
         platformId: postPlatformId,
-        url: postUrl || null,
+        url: cleanPostUrl || null,
         caption: postCaption || undefined,
-        postedAt: new Date().toISOString(),
+        postedAt: postedIso,
       });
 
       if (res.ok) {
@@ -385,19 +521,19 @@ export function ContentStudioClient({
     });
   };
 
-  const handleDeletePost = (postId: string) => {
-    startTransition(async () => {
-      const res = await deletePost({ postId, contentId: content.id });
-      if (res.ok) {
-        toast.success("Post deleted");
-        router.refresh();
-      } else {
-        toast.error(res.error.message);
-      }
-    });
+  const handleConfirmDeletePost = async () => {
+    if (!deletePostTargetId) return;
+    const res = await deletePost({ postId: deletePostTargetId, contentId: content.id });
+    if (res.ok) {
+      toast.success("Post & checkpoints removed");
+      setDeletePostTargetId(null);
+      router.refresh();
+    } else {
+      toast.error(res.error.message);
+    }
   };
 
-  const handleSetRating = (score: number) => {
+  const handleSetRating = (score: number | null) => {
     setRating(score);
     startTransition(async () => {
       const res = await updateContent({
@@ -406,7 +542,23 @@ export function ContentStudioClient({
         finalRatingNote,
       });
       if (res.ok) {
-        toast.success(`Rated ${score}/5`);
+        toast.success(score === null ? "Rating cleared" : `Rated ${score}/5`);
+        router.refresh();
+      } else {
+        toast.error(res.error.message);
+      }
+    });
+  };
+
+  const handleSaveRatingNote = () => {
+    startTransition(async () => {
+      const res = await updateContent({
+        id: content.id,
+        finalRating: rating,
+        finalRatingNote,
+      });
+      if (res.ok) {
+        toast.success("Evaluation note saved");
         router.refresh();
       } else {
         toast.error(res.error.message);
@@ -429,41 +581,51 @@ export function ContentStudioClient({
     });
   };
 
-  const handlePermanentDelete = () => {
-    startTransition(async () => {
-      const res = await deleteContentPermanently({ id: content.id });
-      if (res.ok) {
-        toast.success("Content permanently deleted");
-        router.push("/contents");
-      } else {
-        toast.error(res.error.message);
-      }
-    });
+  const handlePermanentDelete = async () => {
+    const res = await deleteContentPermanently({ id: content.id });
+    if (res.ok) {
+      toast.success("Content permanently deleted");
+      setDeleteContentDialogOpen(false);
+      router.push("/contents");
+    } else {
+      toast.error(res.error.message);
+    }
   };
 
   const doneCount = checklist.filter((c) => c.isDone).length;
   const progressPct = checklist.length > 0 ? Math.round((doneCount / checklist.length) * 100) : 0;
+  const backHref = content.archivedAt ? "/contents?archived=1" : "/contents";
 
   return (
     <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
       {/* Top Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap border-b border-border/80 pb-4">
-        <Link
-          href={content.archivedAt ? "/contents?archived=1" : "/contents"}
+        <button
+          type="button"
+          onClick={() => {
+            if (isDirty) setLeaveDialogOpen(true);
+            else router.push(backHref);
+          }}
           className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="size-3.5" />
           <span>Back to Contents</span>
-        </Link>
+        </button>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {isDirty && (
+            <span className="text-[11px] font-mono font-semibold text-warning px-2 py-0.5 rounded-md bg-warning/10 border border-warning/30">
+              Unsaved edits
+            </span>
+          )}
+
           <Button
             type="button"
             variant="outline"
             size="sm"
             disabled={isPending}
             onClick={handleArchiveToggle}
-            className="text-xs font-mono h-8 gap-1.5"
+            className="text-xs font-mono h-8 rounded-md gap-1.5"
           >
             {content.archivedAt ? (
               <>
@@ -478,39 +640,25 @@ export function ContentStudioClient({
             )}
           </Button>
 
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isPending}
-                className="text-xs font-mono h-8 gap-1.5 text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10"
-              >
-                <Trash2 className="size-3.5" />
-                <span>Delete</span>
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete Content Permanently?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This removes &ldquo;{content.title}&rdquo;, its production checklist, published post logs, and evaluation snapshots. Linked references will automatically return to Selected status.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction variant="destructive" onClick={handlePermanentDelete}>
-                  Delete Permanently
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isPending}
+            onClick={() => setDeleteContentDialogOpen(true)}
+            className="text-xs font-mono h-8 rounded-md gap-1.5 text-destructive hover:text-destructive border-destructive/30 hover:bg-destructive/10"
+          >
+            <Trash2 className="size-3.5" />
+            <span>Delete</span>
+          </Button>
 
           <Button
+            type="button"
             size="sm"
+            disabled={Boolean(content.archivedAt)}
+            title={content.archivedAt ? "Restore content first to publish a post" : undefined}
             onClick={() => setIsAddPostOpen(true)}
-            className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5"
+            className="text-xs font-mono h-8 rounded-md bg-foreground text-background hover:bg-foreground/90 font-bold gap-1.5"
           >
             <Send className="size-3.5" />
             <span>Publish Post</span>
@@ -520,101 +668,129 @@ export function ContentStudioClient({
 
       {/* Archived Banner */}
       {content.archivedAt && (
-        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs font-mono">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-lg border border-warning/40 bg-warning/10 text-xs font-mono">
           <span className="text-foreground">
-            This content is archived ({new Date(content.archivedAt).toLocaleDateString()}) and hidden from active workflows.
+            This content is archived ({new Date(content.archivedAt).toLocaleDateString("en-US", { timeZone: "Asia/Jakarta" })}) and hidden from active workflows.
           </span>
           <Button
             size="sm"
             variant="outline"
             disabled={isPending}
             onClick={handleArchiveToggle}
-            className="h-7 text-xs font-mono gap-1.5 bg-background"
+            className="h-8 text-xs font-mono rounded-md gap-1.5 bg-background"
           >
-            <RotateCcw className="size-3" />
+            <RotateCcw className="size-3.5" />
             <span>Restore to Active</span>
           </Button>
         </div>
       )}
 
-      {/* Main Content Info Card */}
-      <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="space-y-2 flex-1 min-w-[240px]">
+      {/* Main Content Info Card (reads live state) */}
+      <div className="bg-card border border-border rounded-lg p-5 sm:p-6 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+          <div className="space-y-2 flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              {content.format && (
-                <span className="text-xs font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-foreground text-background">
-                  {content.format.name}
+              {liveFormat && (
+                <span className="text-xs font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-foreground text-background">
+                  {liveFormat.name}
                 </span>
               )}
-              {content.series && (
-                <span className="text-xs font-mono px-2 py-0.5 rounded bg-secondary text-foreground border border-border">
-                  {content.series.name}
+              {liveSeries && (
+                <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-secondary text-foreground border border-border">
+                  {liveSeries.name}
                 </span>
               )}
-              {content.hookType && (
-                <span className="text-xs font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
-                  Hook: {content.hookType.name}
+              {liveHookType && (
+                <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-secondary text-muted-foreground border border-border">
+                  Hook: {liveHookType.name}
                 </span>
               )}
-              {content.audio && (
-                <span className="text-xs font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
-                  Audio: {content.audio.title}
-                </span>
+              {liveAudio && (
+                <Link
+                  href={`/audio/${liveAudio.id}`}
+                  className="text-xs font-mono px-2 py-0.5 rounded-md bg-secondary text-muted-foreground hover:text-foreground border border-border inline-flex items-center gap-1"
+                >
+                  <span>Audio: {liveAudio.title}</span>
+                </Link>
               )}
               <StatusBadge status={content.status} />
             </div>
 
-            <h1 className="text-xl sm:text-2xl font-black font-display tracking-tight text-foreground">
-              {content.title}
+            <h1 className="text-xl sm:text-2xl font-black font-display tracking-tight text-foreground break-words">
+              {title || content.title}
             </h1>
           </div>
 
           {/* Rating & Evaluation Note */}
-          <div className="flex flex-col items-end gap-2">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-              Overall Evaluation Rating
-            </span>
-            <div className="flex items-center gap-1">
-              {[1, 2, 3, 4, 5].map((star) => (
+          <div className="flex flex-col items-start md:items-end gap-2 w-full md:w-auto shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="label-mono text-muted-foreground">
+                Overall Rating
+              </span>
+              {rating !== null && (
                 <button
-                  key={star}
                   type="button"
-                  onClick={() => handleSetRating(star)}
-                  className={`p-1 transition-colors ${
-                    rating && star <= rating
-                      ? "text-amber-500 hover:text-amber-600"
-                      : "text-muted-foreground/40 hover:text-foreground"
-                  }`}
+                  onClick={() => handleSetRating(null)}
+                  className="text-[10px] font-mono text-muted-foreground hover:text-foreground inline-flex items-center gap-0.5"
                 >
-                  <Star className={`size-4 ${rating && star <= rating ? "fill-current" : ""}`} />
+                  <X className="size-3" />
+                  <span>Clear</span>
                 </button>
-              ))}
+              )}
             </div>
-            <Input
-              value={finalRatingNote}
-              onChange={(e) => setFinalRatingNote(e.target.value)}
-              placeholder="Takeaway / evaluation note..."
-              className="h-7 w-56 text-[11px] font-mono"
-            />
+            <div className="flex items-center gap-1" role="group" aria-label="Overall evaluation rating">
+              {[1, 2, 3, 4, 5].map((star) => {
+                const active = Boolean(rating && star <= rating);
+                return (
+                  <button
+                    key={star}
+                    type="button"
+                    aria-label={`Rate ${star} out of 5`}
+                    aria-pressed={rating === star}
+                    onClick={() => handleSetRating(star)}
+                    className={`p-1.5 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 ${
+                      active
+                        ? "text-warning hover:text-warning/80"
+                        : "text-muted-foreground/40 hover:text-foreground"
+                    }`}
+                  >
+                    <Star className={`size-4 ${active ? "fill-current" : ""}`} />
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-1.5 w-full md:w-64">
+              <Input
+                value={finalRatingNote}
+                onChange={(e) => setFinalRatingNote(e.target.value)}
+                onBlur={() => {
+                  if (finalRatingNote !== (content.finalRatingNote || "")) {
+                    handleSaveRatingNote();
+                  }
+                }}
+                placeholder="Evaluation takeaway note..."
+                aria-label="Evaluation rating note"
+                className="h-8 flex-1 text-[11px] font-mono rounded-md"
+              />
+            </div>
           </div>
         </div>
 
         {/* Pillars & Tags Summary */}
-        {(content.pillars.length > 0 || content.tags.length > 0) && (
+        {(livePillars.length > 0 || parsedTags.length > 0) && (
           <div className="flex items-center gap-1.5 flex-wrap pt-1">
-            {content.pillars.map((pillar) => (
+            {livePillars.map((pillar) => (
               <span
                 key={pillar.id}
-                className="text-[11px] font-mono px-2 py-0.5 rounded bg-secondary text-foreground border border-border font-medium"
+                className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-secondary text-foreground border border-border font-medium"
               >
                 {pillar.name}
               </span>
             ))}
-            {content.tags.map((tag) => (
+            {parsedTags.map((tag) => (
               <span
                 key={tag}
-                className="text-[11px] font-mono px-2 py-0.5 rounded border border-border/70 text-muted-foreground"
+                className="text-[11px] font-mono px-2 py-0.5 rounded-md border border-border/70 text-muted-foreground"
               >
                 #{tag}
               </span>
@@ -628,11 +804,11 @@ export function ContentStudioClient({
         {/* Left Column (2 Cols): Script, Metadata & Posts */}
         <div className="lg:col-span-2 space-y-6">
           {/* Script & Metadata Editor Card */}
-          <div className="bg-card border border-border rounded-lg p-6 space-y-5">
+          <div className="bg-card border border-border rounded-lg p-5 sm:p-6 space-y-5">
             <div className="flex items-center justify-between border-b border-border/60 pb-3 flex-wrap gap-2">
               <h2 className="text-sm font-black font-display tracking-tight text-foreground flex items-center gap-1.5">
                 <FileText className="size-4" />
-                <span>Studio Editor & Metadata</span>
+                <span>Studio Editor &amp; Metadata</span>
               </h2>
 
               <div className="flex items-center gap-1.5 flex-wrap">
@@ -641,13 +817,13 @@ export function ContentStudioClient({
                   variant="outline"
                   size="sm"
                   onClick={handleGenerateHooks}
-                  disabled={isGeneratingHooks}
-                  className="text-xs font-mono h-7 gap-1 border-border/80 hover:bg-secondary text-foreground"
+                  disabled={isGeneratingHooks || isPending}
+                  className="text-xs font-mono h-8 rounded-md gap-1 border-border/80 hover:bg-secondary text-foreground"
                 >
                   {isGeneratingHooks ? (
                     <Loader2 className="size-3 animate-spin" />
                   ) : (
-                    <Sparkles className="size-3 text-amber-500 fill-amber-500" />
+                    <Sparkles className="size-3 text-warning fill-warning" />
                   )}
                   <span>AI Hooks</span>
                 </Button>
@@ -657,22 +833,23 @@ export function ContentStudioClient({
                   variant="outline"
                   size="sm"
                   onClick={handleDraftScript}
-                  disabled={isDraftingScript}
-                  className="text-xs font-mono h-7 gap-1 border-border/80 hover:bg-secondary text-foreground"
+                  disabled={isDraftingScript || isPending}
+                  className="text-xs font-mono h-8 rounded-md gap-1 border-border/80 hover:bg-secondary text-foreground"
                 >
                   {isDraftingScript ? (
                     <Loader2 className="size-3 animate-spin" />
                   ) : (
-                    <Sparkles className="size-3 text-amber-500 fill-amber-500" />
+                    <Sparkles className="size-3 text-warning fill-warning" />
                   )}
                   <span>Draft Script</span>
                 </Button>
 
                 <Button
+                  type="button"
                   size="sm"
                   onClick={handleSaveDetails}
                   disabled={isPending}
-                  className="text-xs font-mono h-7 bg-foreground text-background font-bold gap-1"
+                  className="text-xs font-mono h-8 rounded-md bg-foreground text-background hover:bg-foreground/90 font-bold gap-1"
                 >
                   {isPending ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
                   <span>Save Changes</span>
@@ -682,96 +859,90 @@ export function ContentStudioClient({
 
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                <Label htmlFor="studio-title" className="label-mono text-muted-foreground">
                   Title
                 </Label>
                 <Input
+                  id="studio-title"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="text-xs font-mono h-9"
+                  className="text-xs font-mono h-9 rounded-md"
                 />
               </div>
 
               {/* Classification Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  <Label htmlFor="studio-format" className="label-mono text-muted-foreground">
                     Format
                   </Label>
-                  <select
+                  <SelectField
+                    id="studio-format"
                     value={formatId}
-                    onChange={(e) => setFormatId(e.target.value)}
-                    className="w-full h-9 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
-                  >
-                    <option value="">-- Unset Format --</option>
-                    {masterData.formats.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setFormatId}
+                    ariaLabel="Format"
+                    options={[
+                      { value: "", label: "-- Unset Format --" },
+                      ...masterData.formats.map((f) => ({ value: f.id, label: f.name })),
+                    ]}
+                  />
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  <Label htmlFor="studio-series" className="label-mono text-muted-foreground">
                     Series
                   </Label>
-                  <select
+                  <SelectField
+                    id="studio-series"
                     value={seriesId}
-                    onChange={(e) => setSeriesId(e.target.value)}
-                    className="w-full h-9 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
-                  >
-                    <option value="">-- Standalone Content --</option>
-                    {studioOptions.series.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setSeriesId}
+                    ariaLabel="Series"
+                    options={[
+                      { value: "", label: "-- Standalone Content --" },
+                      ...studioOptions.series.map((s) => ({ value: s.id, label: s.name })),
+                    ]}
+                  />
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  <Label htmlFor="studio-hook-type" className="label-mono text-muted-foreground">
                     Hook Classification
                   </Label>
-                  <select
+                  <SelectField
+                    id="studio-hook-type"
                     value={hookTypeId}
-                    onChange={(e) => setHookTypeId(e.target.value)}
-                    className="w-full h-9 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
-                  >
-                    <option value="">-- Unset Hook Type --</option>
-                    {masterData.hookTypes.map((ht) => (
-                      <option key={ht.id} value={ht.id}>
-                        {ht.name}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setHookTypeId}
+                    ariaLabel="Hook Classification"
+                    options={[
+                      { value: "", label: "-- Unset Hook Type --" },
+                      ...masterData.hookTypes.map((ht) => ({ value: ht.id, label: ht.name })),
+                    ]}
+                  />
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  <Label htmlFor="studio-audio" className="label-mono text-muted-foreground">
                     Audio Track
                   </Label>
-                  <select
+                  <SelectField
+                    id="studio-audio"
                     value={audioId}
-                    onChange={(e) => setAudioId(e.target.value)}
-                    className="w-full h-9 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
-                  >
-                    <option value="">-- No Track Selected --</option>
-                    {studioOptions.audios.map((audio) => (
-                      <option key={audio.id} value={audio.id}>
-                        {audio.title}
-                        {audio.artist ? ` — ${audio.artist}` : ""}
-                        {audio.isOriginal ? " (Original)" : ""}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setAudioId}
+                    ariaLabel="Audio Track"
+                    options={[
+                      { value: "", label: "-- No Track Selected --" },
+                      ...studioOptions.audios.map((audio) => ({
+                        value: audio.id,
+                        label: `${audio.title}${audio.artist ? ` — ${audio.artist}` : ""}${audio.isOriginal ? " (Original)" : ""}`,
+                      })),
+                    ]}
+                  />
                 </div>
               </div>
 
               {/* Pillars Selection */}
               <div className="space-y-2">
-                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                <Label className="label-mono text-muted-foreground">
                   Content Pillars
                 </Label>
                 <div className="flex flex-wrap gap-1.5">
@@ -781,8 +952,9 @@ export function ContentStudioClient({
                       <button
                         key={pillar.id}
                         type="button"
+                        aria-pressed={isSelected}
                         onClick={() => togglePillar(pillar.id)}
-                        className={`px-2.5 py-1 text-[11px] font-mono rounded border transition-all select-none ${
+                        className={`px-2.5 py-1.5 text-[11px] font-mono rounded-md border transition-colors select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 ${
                           isSelected
                             ? "bg-foreground text-background border-foreground font-semibold"
                             : "bg-secondary text-muted-foreground border-border hover:text-foreground"
@@ -796,89 +968,127 @@ export function ContentStudioClient({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                <Label htmlFor="studio-hook-text" className="label-mono text-muted-foreground">
                   Opening Hook Line
                 </Label>
                 <Input
+                  id="studio-hook-text"
                   value={hookText}
                   onChange={(e) => setHookText(e.target.value)}
                   placeholder="The opening line or headline..."
-                  className="text-xs font-mono h-9"
+                  className="text-xs font-mono h-9 rounded-md"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                  Script / Outline & Cues
+                <Label htmlFor="studio-notes" className="label-mono text-muted-foreground">
+                  Script / Outline &amp; Cues
                 </Label>
                 <Textarea
+                  id="studio-notes"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Draft your script, scene breakdown, b-roll checklist..."
                   rows={8}
-                  className="text-xs font-mono"
+                  className="text-xs font-mono rounded-md leading-relaxed"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                <Label htmlFor="studio-changes" className="label-mono text-muted-foreground">
                   What I Changed / Original Spin
                 </Label>
                 <Textarea
+                  id="studio-changes"
                   value={changesNote}
                   onChange={(e) => setChangesNote(e.target.value)}
                   placeholder="How you adapted the angle, pacing, visual framing, or audience context..."
                   rows={3}
-                  className="text-xs font-mono"
+                  className="text-xs font-mono rounded-md"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                <Label htmlFor="studio-tags" className="label-mono text-muted-foreground">
                   Tags (comma-separated)
                 </Label>
                 <Input
+                  id="studio-tags"
                   value={tagsInput}
                   onChange={(e) => setTagsInput(e.target.value)}
                   placeholder="lighting, tutorial, desk-tour"
-                  className="text-xs font-mono h-9"
+                  className="text-xs font-mono h-9 rounded-md"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  <Label htmlFor="studio-work-url" className="label-mono text-muted-foreground">
                     Work Asset / Drive Link
                   </Label>
-                  <Input
-                    value={workUrl}
-                    onChange={(e) => setWorkUrl(e.target.value)}
-                    placeholder="https://..."
-                    className="text-xs font-mono h-9"
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      id="studio-work-url"
+                      type="url"
+                      value={workUrl}
+                      onChange={(e) => setWorkUrl(e.target.value)}
+                      placeholder="https://..."
+                      className="text-xs font-mono h-9 rounded-md flex-1 min-w-0"
+                    />
+                    {workUrl.trim() && /^https?:\/\/.+/i.test(workUrl.trim()) && (
+                      <Button
+                        asChild
+                        variant="outline"
+                        size="sm"
+                        title="Open work asset link"
+                        className="h-9 w-9 p-0 shrink-0 rounded-md"
+                      >
+                        <a href={workUrl.trim()} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="size-3.5" />
+                        </a>
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  <Label htmlFor="studio-planned-for" className="label-mono text-muted-foreground">
                     Target Shoot Date
                   </Label>
                   <Input
+                    id="studio-planned-for"
                     type="date"
                     value={plannedFor}
                     onChange={(e) => setPlannedFor(e.target.value)}
-                    className="text-xs font-mono h-9"
+                    className="text-xs font-mono h-9 rounded-md"
                   />
                 </div>
               </div>
             </div>
+
+            <div className="pt-4 border-t border-border/60 flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-[11px] font-mono text-muted-foreground">
+                {isDirty ? "Unsaved changes in editor" : "All changes saved"}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSaveDetails}
+                disabled={isPending}
+                className="text-xs font-mono h-9 px-4 rounded-md bg-foreground text-background hover:bg-foreground/90 font-bold gap-1.5"
+              >
+                {isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                <span>Save Changes</span>
+              </Button>
+            </div>
           </div>
 
           {/* Published Posts & Snapshots Card */}
-          <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+          <div className="bg-card border border-border rounded-lg p-5 sm:p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
               <div className="space-y-0.5">
                 <h2 className="text-sm font-black font-display tracking-tight text-foreground flex items-center gap-2">
                   <Send className="size-4" />
-                  <span>Published Posts & Performance Checkpoints</span>
+                  <span>Published Posts &amp; Performance Checkpoints</span>
                 </h2>
                 <p className="text-[11px] font-mono text-muted-foreground">
                   Posts auto-generate 24h, 7d, and 30d evaluation checkpoints for eligible formats
@@ -886,10 +1096,12 @@ export function ContentStudioClient({
               </div>
 
               <Button
+                type="button"
                 variant="outline"
                 size="sm"
+                disabled={Boolean(content.archivedAt)}
                 onClick={() => setIsAddPostOpen(true)}
-                className="text-xs font-mono h-7 gap-1"
+                className="text-xs font-mono h-8 rounded-md gap-1 shrink-0"
               >
                 <Plus className="size-3" />
                 <span>Add Post</span>
@@ -897,30 +1109,50 @@ export function ContentStudioClient({
             </div>
 
             {content.posts.length === 0 ? (
-              <div className="p-8 text-center rounded border border-dashed border-border bg-secondary/30 space-y-2">
+              <div className="p-8 text-center rounded-md border border-dashed border-border bg-secondary/30 space-y-3">
                 <Clock className="size-6 mx-auto text-muted-foreground" />
-                <p className="text-xs font-mono text-muted-foreground">
+                <p className="text-xs font-mono text-muted-foreground max-w-md mx-auto">
                   Not published yet. When ready, click &ldquo;Add Post&rdquo; to record the live URL and start tracking checkpoints.
                 </p>
+                {!content.archivedAt && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setIsAddPostOpen(true)}
+                    className="h-8 text-xs font-mono rounded-md gap-1.5"
+                  >
+                    <Send className="size-3.5" />
+                    <span>Record First Post</span>
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
                 {content.posts.map((post) => (
                   <div
                     key={post.id}
-                    className="p-4 rounded border border-border bg-secondary/20 space-y-3"
+                    className="p-4 rounded-md border border-border bg-secondary/20 space-y-3"
                   >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-foreground text-background">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-foreground text-background">
                           {post.platformName}
+                        </span>
+                        <span className="text-[11px] font-mono text-muted-foreground">
+                          {new Date(post.postedAt).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                            timeZone: "Asia/Jakarta",
+                          })}
                         </span>
                         {post.url ? (
                           <a
                             href={post.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-xs font-mono text-muted-foreground hover:text-foreground flex items-center gap-1"
+                            className="text-xs font-mono text-muted-foreground hover:text-foreground inline-flex items-center gap-1 underline underline-offset-2"
                           >
                             <span>Live Post</span>
                             <ExternalLink className="size-3" />
@@ -933,12 +1165,14 @@ export function ContentStudioClient({
                       </div>
 
                       <Button
+                        type="button"
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDeletePost(post.id)}
-                        className="h-6 px-1.5 text-xs text-destructive hover:bg-destructive/10"
+                        aria-label={`Delete ${post.platformName} post`}
+                        onClick={() => setDeletePostTargetId(post.id)}
+                        className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 rounded-md"
                       >
-                        <Trash2 className="size-3" />
+                        <Trash2 className="size-3.5" />
                       </Button>
                     </div>
 
@@ -954,11 +1188,12 @@ export function ContentStudioClient({
                         {post.snapshots.map((snap) => {
                           const isDone = snap.status === "done";
                           return (
-                            <div
+                            <Link
                               key={snap.id}
-                              className={`p-2.5 rounded border text-xs font-mono space-y-1 ${
+                              href={isDone ? "/evaluate?filter=done" : "/evaluate"}
+                              className={`p-2.5 rounded-md border text-xs font-mono space-y-1 transition-colors hover:border-foreground/40 ${
                                 isDone
-                                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-800"
+                                  ? "bg-success/10 border-success/30 text-success"
                                   : "bg-card border-border text-muted-foreground"
                               }`}
                             >
@@ -972,14 +1207,14 @@ export function ContentStudioClient({
                               {isDone ? (
                                 <div className="text-[11px] font-mono text-foreground font-semibold">
                                   {snap.views !== null && `${snap.views} views`}
-                                  {snap.rating !== null && ` • ${snap.rating}/5 rating`}
+                                  {snap.rating !== null && ` • ${snap.rating}/5`}
                                 </div>
                               ) : (
-                                <div className="text-[10px] text-muted-foreground/80">
-                                  Due: {new Date(snap.dueAt).toLocaleDateString()}
+                                <div className="text-[10px] text-muted-foreground/90">
+                                  Due: {new Date(snap.dueAt).toLocaleDateString("en-US", { timeZone: "Asia/Jakarta" })}
                                 </div>
                               )}
-                            </div>
+                            </Link>
                           );
                         })}
                       </div>
@@ -997,15 +1232,22 @@ export function ContentStudioClient({
           <div className="bg-card border border-border rounded-lg p-5 space-y-4">
             <div className="space-y-1.5 border-b border-border/60 pb-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground flex items-center gap-1.5">
+                <h3 className="label-mono font-bold text-foreground flex items-center gap-1.5">
                   <CheckSquare className="size-3.5" />
                   <span>Checklist</span>
                 </h3>
-                <span className="text-xs font-mono font-bold text-muted-foreground">
+                <span className="text-xs font-mono font-bold text-muted-foreground tabular-nums">
                   {doneCount}/{checklist.length} ({progressPct}%)
                 </span>
               </div>
-              <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden border border-border/60">
+              <div
+                role="progressbar"
+                aria-label="Production checklist completion"
+                aria-valuenow={progressPct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                className="w-full h-1.5 bg-secondary rounded-sm overflow-hidden border border-border/60"
+              >
                 <div
                   className="h-full bg-foreground transition-all duration-300"
                   style={{ width: `${progressPct}%` }}
@@ -1013,24 +1255,24 @@ export function ContentStudioClient({
               </div>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {checklist.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center justify-between gap-2 p-2 rounded hover:bg-secondary/40 transition-colors group"
+                  className="flex items-center justify-between gap-2 p-2 rounded-md hover:bg-secondary/40 transition-colors group"
                 >
                   <button
                     type="button"
                     onClick={() => handleToggleChecklist(item.id, item.isDone)}
-                    className="flex items-center gap-2 text-left flex-1"
+                    className="flex items-center gap-2 text-left flex-1 min-w-0 focus-visible:outline-none focus-visible:underline"
                   >
                     {item.isDone ? (
-                      <CheckSquare className="size-4 text-emerald-600 shrink-0" />
+                      <CheckSquare className="size-4 text-success shrink-0" />
                     ) : (
                       <Square className="size-4 text-muted-foreground shrink-0" />
                     )}
                     <span
-                      className={`text-xs font-mono select-none ${
+                      className={`text-xs font-mono select-none break-words ${
                         item.isDone
                           ? "line-through text-muted-foreground"
                           : "text-foreground font-medium"
@@ -1042,10 +1284,11 @@ export function ContentStudioClient({
 
                   <button
                     type="button"
-                    onClick={() => handleDeleteChecklistItem(item.id)}
-                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive p-1 transition-opacity"
+                    aria-label={`Remove step ${item.label}`}
+                    onClick={() => setDeleteStepTarget({ id: item.id, label: item.label })}
+                    className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-destructive p-1.5 rounded-md transition-opacity shrink-0"
                   >
-                    <Trash2 className="size-3" />
+                    <Trash2 className="size-3.5" />
                   </button>
                 </div>
               ))}
@@ -1055,10 +1298,18 @@ export function ContentStudioClient({
               <Input
                 value={newChecklistText}
                 onChange={(e) => setNewChecklistText(e.target.value)}
+                maxLength={120}
                 placeholder="Add step..."
-                className="text-xs font-mono h-8"
+                aria-label="Add checklist step"
+                className="text-xs font-mono h-9 rounded-md"
               />
-              <Button size="sm" type="submit" className="text-xs font-mono h-8 px-2.5">
+              <Button
+                size="sm"
+                type="submit"
+                disabled={isPending || !newChecklistText.trim()}
+                aria-label="Add step"
+                className="text-xs font-mono h-9 px-3 rounded-md shrink-0"
+              >
                 <Plus className="size-3.5" />
               </Button>
             </form>
@@ -1066,7 +1317,7 @@ export function ContentStudioClient({
 
           {/* Linked References Card */}
           <div className="bg-card border border-border rounded-lg p-5 space-y-4">
-            <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-foreground flex items-center gap-1.5 border-b border-border/60 pb-3">
+            <h3 className="label-mono font-bold text-foreground flex items-center gap-1.5 border-b border-border/60 pb-3">
               <LinkIcon className="size-3.5" />
               <span>Linked References ({content.refs.length})</span>
             </h3>
@@ -1080,7 +1331,7 @@ export function ContentStudioClient({
                 {content.refs.map((ref) => (
                   <div
                     key={ref.id}
-                    className="p-2.5 rounded border border-border bg-secondary/30 space-y-1.5"
+                    className="p-2.5 rounded-md border border-border bg-secondary/30 space-y-1.5"
                   >
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-muted-foreground">
@@ -1088,11 +1339,12 @@ export function ContentStudioClient({
                       </span>
                       <button
                         type="button"
+                        aria-label="Unlink reference"
                         onClick={() => handleUnlinkRef(ref.id)}
                         title="Unlink reference"
-                        className="text-muted-foreground hover:text-destructive p-1"
+                        className="text-muted-foreground hover:text-destructive p-1 rounded"
                       >
-                        <Unlink className="size-3" />
+                        <Unlink className="size-3.5" />
                       </button>
                     </div>
 
@@ -1110,28 +1362,28 @@ export function ContentStudioClient({
             {/* + Link existing reference */}
             {unlinkedRefs.length > 0 && (
               <div className="pt-2 border-t border-border/60 space-y-2">
-                <Label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                <Label htmlFor="studio-link-ref" className="label-mono text-muted-foreground">
                   Link Existing Reference
                 </Label>
                 <div className="flex items-center gap-2">
-                  <select
+                  <SelectField
+                    id="studio-link-ref"
                     value={linkRefId}
-                    onChange={(e) => setLinkRefId(e.target.value)}
-                    className="flex-1 min-w-0 h-8 px-2 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
-                  >
-                    {unlinkedRefs.map((ref) => (
-                      <option key={ref.id} value={ref.id}>
-                        [{ref.platformName}] {(ref.hookText || ref.url).slice(0, 48)}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setLinkRefId}
+                    ariaLabel="Select existing reference to link"
+                    className="flex-1 min-w-0"
+                    options={unlinkedRefs.map((ref) => ({
+                      value: ref.id,
+                      label: `[${ref.platformName}] ${(ref.hookText || ref.url).slice(0, 48)}`,
+                    }))}
+                  />
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
                     disabled={isPending || !linkRefId}
                     onClick={handleLinkRef}
-                    className="h-8 px-2.5 text-xs font-mono gap-1 shrink-0"
+                    className="h-9 px-2.5 text-xs font-mono rounded-md gap-1 shrink-0"
                   >
                     <Plus className="size-3" />
                     <span>Link</span>
@@ -1157,56 +1409,77 @@ export function ContentStudioClient({
             </DialogHeader>
 
             <div className="space-y-4 py-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                  Platform
-                </Label>
-                <select
-                  value={postPlatformId}
-                  onChange={(e) => setPostPlatformId(e.target.value)}
-                  className="w-full h-9 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
-                >
-                  {masterData.platforms.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="post-platform" className="label-mono text-muted-foreground">
+                    Platform
+                  </Label>
+                  <SelectField
+                    id="post-platform"
+                    value={postPlatformId}
+                    onValueChange={setPostPlatformId}
+                    ariaLabel="Platform"
+                    options={masterData.platforms.map((p) => {
+                      const already = postedPlatformIds.has(p.id);
+                      return {
+                        value: p.id,
+                        label: `${p.name}${already ? " (Already posted)" : ""}`,
+                        disabled: already,
+                      };
+                    })}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="post-date-time" className="label-mono text-muted-foreground">
+                    Published Date &amp; Time
+                  </Label>
+                  <Input
+                    id="post-date-time"
+                    type="datetime-local"
+                    value={postDateTime}
+                    onChange={(e) => setPostDateTime(e.target.value)}
+                    className="text-xs font-mono h-9 rounded-md"
+                  />
+                </div>
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                <Label htmlFor="post-url" className="label-mono text-muted-foreground">
                   Post URL (Optional)
                 </Label>
                 <Input
+                  id="post-url"
                   type="url"
                   value={postUrl}
                   onChange={(e) => setPostUrl(e.target.value)}
-                  placeholder="https://instagram.com/p/..."
-                  className="text-xs font-mono h-9"
+                  placeholder="https://instagram.com/reel/..."
+                  className="text-xs font-mono h-9 rounded-md"
                 />
               </div>
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  <Label htmlFor="post-caption" className="label-mono text-muted-foreground">
                     Caption or Post Notes (Optional)
                   </Label>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     {studioOptions.snippets.length > 0 && (
-                      <select
+                      <SelectField
+                        ariaLabel="Insert caption or hashtag snippet"
+                        size="sm"
                         value={selectedSnippetId}
-                        onChange={(e) => handleInsertSnippet(e.target.value)}
-                        className="h-7 px-2 text-[11px] font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
-                      >
-                        <option value="">+ Insert Snippet</option>
-                        {studioOptions.snippets.map((sn) => (
-                          <option key={sn.id} value={sn.id}>
-                            [{sn.kind}] {sn.title}
-                          </option>
-                        ))}
-                      </select>
+                        onValueChange={handleInsertSnippet}
+                        className="w-auto min-w-[148px] max-w-[200px] text-[11px]"
+                        options={[
+                          { value: "", label: "+ Insert Snippet" },
+                          ...studioOptions.snippets.map((sn) => ({
+                            value: sn.id,
+                            label: `[${sn.kind}] ${sn.title}`,
+                          })),
+                        ]}
+                      />
                     )}
 
                     <Button
@@ -1215,12 +1488,12 @@ export function ContentStudioClient({
                       size="sm"
                       disabled={isGeneratingCaption}
                       onClick={handleGenerateCaption}
-                      className="h-7 px-2.5 text-[11px] font-mono gap-1"
+                      className="h-8 px-2.5 text-[11px] font-mono rounded-md gap-1"
                     >
                       {isGeneratingCaption ? (
                         <Loader2 className="size-3 animate-spin" />
                       ) : (
-                        <Sparkles className="size-3 text-amber-500 fill-amber-500" />
+                        <Sparkles className="size-3 text-warning fill-warning" />
                       )}
                       <span>AI Write Caption</span>
                     </Button>
@@ -1228,11 +1501,12 @@ export function ContentStudioClient({
                 </div>
 
                 <Textarea
+                  id="post-caption"
                   value={postCaption}
                   onChange={(e) => setPostCaption(e.target.value)}
                   placeholder="Write caption, CTA, or hashtags..."
                   rows={5}
-                  className="text-xs font-mono"
+                  className="text-xs font-mono rounded-md"
                 />
               </div>
             </div>
@@ -1243,15 +1517,15 @@ export function ContentStudioClient({
                 variant="outline"
                 size="sm"
                 onClick={() => setIsAddPostOpen(false)}
-                className="text-xs font-mono h-8"
+                className="text-xs font-mono h-9 rounded-md"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 size="sm"
-                disabled={isPending}
-                className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5"
+                disabled={isPending || postedPlatformIds.has(postPlatformId)}
+                className="text-xs font-mono h-9 rounded-md bg-foreground text-background font-bold gap-1.5"
               >
                 {isPending ? <Loader2 className="size-3 animate-spin" /> : <Send className="size-3" />}
                 <span>Confirm Post</span>
@@ -1261,12 +1535,12 @@ export function ContentStudioClient({
         </DialogContent>
       </Dialog>
 
-      {/* Hook Picker Dialog */}
+      {/* Hook Picker Dialog (keyboard-accessible button items) */}
       <Dialog open={isHooksModalOpen} onOpenChange={setIsHooksModalOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="text-lg font-black font-display tracking-tight flex items-center gap-2">
-              <Sparkles className="size-4 text-amber-500 fill-amber-500" />
+              <Sparkles className="size-4 text-warning fill-warning" />
               <span>AI Viral Hook Suggestions</span>
             </DialogTitle>
             <DialogDescription className="text-xs font-mono text-muted-foreground">
@@ -1276,17 +1550,18 @@ export function ContentStudioClient({
 
           <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto">
             {hookOptions.map((hook, idx) => (
-              <div
+              <button
                 key={idx}
+                type="button"
                 onClick={() => handleApplyHook(hook)}
-                className="p-3 rounded-lg border border-border bg-secondary/30 hover:border-foreground/60 hover:bg-secondary/70 cursor-pointer transition-all space-y-1.5 group"
+                className="w-full text-left p-3 rounded-lg border border-border bg-secondary/30 hover:border-foreground/60 hover:bg-secondary/70 transition-colors space-y-1.5 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-foreground text-background">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-foreground text-background">
                     {hook.archetype}
                   </span>
                   <span className="text-[11px] font-mono text-muted-foreground group-hover:text-foreground">
-                    Click to apply →
+                    Apply →
                   </span>
                 </div>
                 <p className="text-xs font-mono font-medium text-foreground">
@@ -1295,11 +1570,61 @@ export function ContentStudioClient({
                 <p className="text-[10px] font-mono text-muted-foreground">
                   {hook.whyItWorks}
                 </p>
-              </div>
+              </button>
             ))}
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleteContentDialogOpen}
+        onOpenChange={setDeleteContentDialogOpen}
+        title="Delete Content Permanently?"
+        description={`This removes "${content.title}", its production checklist, published post logs, and evaluation snapshots. Linked references will automatically return to Selected status.`}
+        confirmLabel="Delete Permanently"
+        cancelLabel="Cancel"
+        variant="destructive"
+        isPending={isPending}
+        onConfirm={handlePermanentDelete}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deletePostTargetId)}
+        onOpenChange={(open) => !open && setDeletePostTargetId(null)}
+        title="Delete Published Post?"
+        description="Deleting this post also deletes all of its 24h, 7d, and 30d evaluation snapshots and reverts content/reference statuses if no other posts remain."
+        confirmLabel="Delete Post"
+        cancelLabel="Keep Post"
+        variant="destructive"
+        isPending={isPending}
+        onConfirm={handleConfirmDeletePost}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleteStepTarget)}
+        onOpenChange={(open) => !open && setDeleteStepTarget(null)}
+        title="Remove checklist step?"
+        description={`Remove "${deleteStepTarget?.label || ""}" from the production checklist?`}
+        confirmLabel="Remove Step"
+        cancelLabel="Cancel"
+        variant="destructive"
+        isPending={isPending}
+        onConfirm={handleConfirmDeleteChecklist}
+      />
+
+      <ConfirmDialog
+        open={leaveDialogOpen}
+        onOpenChange={setLeaveDialogOpen}
+        title="Leave with unsaved changes?"
+        description="You have unsaved edits in the Studio Editor. Leaving now will discard them."
+        confirmLabel="Discard & Leave"
+        cancelLabel="Stay"
+        variant="destructive"
+        onConfirm={() => {
+          setLeaveDialogOpen(false);
+          router.push(backHref);
+        }}
+      />
     </div>
   );
 }

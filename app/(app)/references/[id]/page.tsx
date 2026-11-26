@@ -26,7 +26,7 @@ export default async function ReferenceDetailPage({ params }: ReferencePageProps
 
   return (
     <ReferenceDetailClient
-      key={`${reference.id}:${reference.summary ?? ""}:${reference.hookText ?? ""}:${reference.audio?.title ?? ""}:${reference.pillars.map((p) => p.id).join(",")}:${reference.tags.join(",")}:${reference.contentId ?? ""}`}
+      key={reference.id}
       reference={reference}
       masterData={masterData}
       similarReferences={similarReferences}

@@ -3,22 +3,27 @@ import { EvaluateClient } from "./evaluate-client";
 
 export const instant = false;
 
+const VALID_FILTERS = new Set(["due", "upcoming", "done", "skipped"] as const);
+
 interface EvaluatePageProps {
   searchParams: Promise<{
-    filter?: "due" | "upcoming" | "done";
+    filter?: string;
   }>;
 }
 
 export default async function EvaluatePage({ searchParams }: EvaluatePageProps) {
-  const { filter = "due" } = await searchParams;
+  const params = await searchParams;
+  const activeTab = VALID_FILTERS.has(params.filter as "due" | "upcoming" | "done" | "skipped")
+    ? (params.filter as "due" | "upcoming" | "done" | "skipped")
+    : "due";
 
-  const { items, counts } = await listSnapshots({ filter });
+  const { items, counts } = await listSnapshots({ filter: activeTab });
 
   return (
     <EvaluateClient
       initialItems={items}
       counts={counts}
-      activeTab={filter}
+      activeTab={activeTab}
     />
   );
 }

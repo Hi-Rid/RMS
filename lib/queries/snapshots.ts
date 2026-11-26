@@ -38,22 +38,22 @@ export interface SnapshotItem {
 
 export interface ListSnapshotsParams {
   userId?: string;
-  filter?: "due" | "upcoming" | "done" | "all";
+  filter?: "due" | "upcoming" | "done" | "skipped" | "all";
 }
 
 /**
- * Retrieves snapshot checkpoints for the active user filtered by due, upcoming, or completed status.
+ * Retrieves snapshot checkpoints for the active user filtered by due, upcoming, completed, or skipped status.
  */
 export async function listSnapshots(params: ListSnapshotsParams = {}): Promise<{
   items: SnapshotItem[];
-  counts: { due: number; upcoming: number; done: number };
+  counts: { due: number; upcoming: number; done: number; skipped: number };
 }> {
   try {
     const { filter = "due" } = params;
     const userId = params.userId ?? (await getOwner())?.id;
-    if (!userId) return { items: [], counts: { due: 0, upcoming: 0, done: 0 } };
+    if (!userId) return { items: [], counts: { due: 0, upcoming: 0, done: 0, skipped: 0 } };
 
-    const [dueCountRes, upcomingCountRes, doneCountRes] = await Promise.all([
+    const [dueCountRes, upcomingCountRes, doneCountRes, skippedCountRes] = await Promise.all([
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(snapshots)
@@ -78,12 +78,17 @@ export async function listSnapshots(params: ListSnapshotsParams = {}): Promise<{
         .select({ count: sql<number>`count(*)::int` })
         .from(snapshots)
         .where(and(eq(snapshots.userId, userId), eq(snapshots.status, "done"))),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(snapshots)
+        .where(and(eq(snapshots.userId, userId), eq(snapshots.status, "skipped"))),
     ]);
 
     const counts = {
       due: dueCountRes[0]?.count || 0,
       upcoming: upcomingCountRes[0]?.count || 0,
       done: doneCountRes[0]?.count || 0,
+      skipped: skippedCountRes[0]?.count || 0,
     };
 
     const conditions = [eq(snapshots.userId, userId)];
@@ -95,6 +100,8 @@ export async function listSnapshots(params: ListSnapshotsParams = {}): Promise<{
       conditions.push(sql`${snapshots.dueAt} > now()`);
     } else if (filter === "done") {
       conditions.push(eq(snapshots.status, "done"));
+    } else if (filter === "skipped") {
+      conditions.push(eq(snapshots.status, "skipped"));
     }
 
     const rows = await db
@@ -109,7 +116,7 @@ export async function listSnapshots(params: ListSnapshotsParams = {}): Promise<{
       .innerJoin(contents, eq(posts.contentId, contents.id))
       .innerJoin(platforms, eq(posts.platformId, platforms.id))
       .where(and(...conditions))
-      .orderBy(filter === "done" ? desc(snapshots.filledAt) : asc(snapshots.dueAt))
+      .orderBy(filter === "done" || filter === "skipped" ? desc(snapshots.filledAt) : asc(snapshots.dueAt))
       .limit(50);
 
     const items: SnapshotItem[] = rows.map((r) => ({
@@ -151,6 +158,6 @@ export async function listSnapshots(params: ListSnapshotsParams = {}): Promise<{
     return { items, counts };
   } catch (error) {
     console.warn("Failed to list snapshots (database fallback):", error);
-    return { items: [], counts: { due: 0, upcoming: 0, done: 0 } };
+    return { items: [], counts: { due: 0, upcoming: 0, done: 0, skipped: 0 } };
   }
 }

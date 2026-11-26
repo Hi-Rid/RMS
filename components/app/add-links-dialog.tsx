@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Upload, Link as LinkIcon, AlertCircle, CheckCircle2, FileText, ArrowRight } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Upload, AlertCircle, Link as LinkIcon } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -27,7 +28,10 @@ interface AddLinksDialogProps {
   children?: React.ReactNode;
 }
 
+const URL_COUNT_REGEX = /(?:https?:\/\/[^\s"'<>]+|(?:instagram\.com|www\.instagram\.com|tiktok\.com|vt\.tiktok\.com|youtube\.com|youtu\.be|x\.com|twitter\.com|threads\.net)\/[^\s"'<>]+)/gi;
+
 export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogProps) {
+  const router = useRouter();
   const [internalOpen, setInternalOpen] = React.useState(false);
   const isControlled = open !== undefined;
   const isOpen = isControlled ? open : internalOpen;
@@ -35,15 +39,36 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
 
   const [linksText, setLinksText] = React.useState("");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [invalidNote, setInvalidNote] = React.useState<string | null>(null);
 
   // File import state
   const [fileLoading, setFileLoading] = React.useState(false);
+  const [isDragging, setIsDragging] = React.useState(false);
   const [previewData, setPreviewData] = React.useState<{
     total: number;
     newCount: number;
     duplicateCount: number;
     items: ImportPreviewItem[];
   } | null>(null);
+
+  const detectedUrlCount = React.useMemo(() => {
+    if (!linksText.trim()) return 0;
+    const matches = linksText.match(URL_COUNT_REGEX);
+    return matches ? matches.length : 0;
+  }, [linksText]);
+
+  const handleDialogOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && (isSubmitting || fileLoading)) {
+      return;
+    }
+    if (!nextOpen) {
+      setLinksText("");
+      setPreviewData(null);
+      setInvalidNote(null);
+      setIsDragging(false);
+    }
+    setIsOpen(nextOpen);
+  };
 
   const handlePasteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,20 +78,44 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
     }
 
     setIsSubmitting(true);
+    setInvalidNote(null);
     try {
       const res = await createReferencesFromText({ text: linksText });
       if (res.ok) {
-        const { totalProcessed, createdCount } = res.data;
-        const dupes = totalProcessed - createdCount;
+        const { results, createdCount, duplicateCount = 0, invalidCount = 0, truncatedCount = 0 } = res.data;
+        const failedInputs = results.filter((r) => r.status === "invalid").map((r) => r.input);
+
         if (createdCount > 0) {
           toast.success(
             `Added ${createdCount} reference${createdCount > 1 ? "s" : ""} to Inbox${
-              dupes > 0 ? ` (${dupes} already saved)` : ""
-            }`
+              duplicateCount > 0 ? ` (${duplicateCount} already saved)` : ""
+            }${invalidCount > 0 ? ` · ${invalidCount} invalid` : ""}`,
+            {
+              action: {
+                label: "Open Inbox",
+                onClick: () => router.push("/inbox"),
+              },
+            }
           );
-        } else {
-          toast.info(`All ${totalProcessed} links are already in your references`);
+        } else if (duplicateCount > 0 && invalidCount === 0) {
+          toast.info(`All ${duplicateCount} link${duplicateCount > 1 ? "s are" : " is"} already in your references`);
         }
+
+        if (truncatedCount > 0) {
+          toast.warning(`Only the first 50 URLs were processed (${truncatedCount} remaining).`);
+        }
+
+        if (failedInputs.length > 0) {
+          setLinksText(failedInputs.join("\n"));
+          setInvalidNote(
+            `${failedInputs.length} URL${failedInputs.length > 1 ? "s" : ""} could not be parsed. Fix or remove them below.`
+          );
+          if (createdCount === 0) {
+            toast.error("No valid supported URLs could be saved");
+          }
+          return;
+        }
+
         setLinksText("");
         setIsOpen(false);
       } else {
@@ -79,10 +128,7 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processImportedFile = (file: File) => {
     setFileLoading(true);
     const reader = new FileReader();
 
@@ -98,9 +144,6 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
         const res = await previewImport({ text: content });
         if (res.ok) {
           setPreviewData(res.data);
-          if (res.data.total === 0) {
-            toast.info("No recognizable video or post URLs found in file");
-          }
         } else {
           toast.error(res.error.message || "Failed to parse file");
         }
@@ -119,6 +162,24 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
     reader.readAsText(file);
   };
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset file input so selecting the same file after fixes still triggers onChange
+    e.target.value = "";
+    if (!file) return;
+    processImportedFile(file);
+  };
+
+  const handleFileDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (fileLoading) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processImportedFile(file);
+    }
+  };
+
   const handleConfirmImport = async () => {
     if (!previewData || previewData.newCount === 0) return;
 
@@ -128,7 +189,12 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
     try {
       const res = await importReferencesFromUrls({ urls: newUrls });
       if (res.ok) {
-        toast.success(`Successfully imported ${res.data.created} references`);
+        toast.success(`Successfully imported ${res.data.created} references to Inbox`, {
+          action: {
+            label: "Open Inbox",
+            onClick: () => router.push("/inbox"),
+          },
+        });
         setPreviewData(null);
         setIsOpen(false);
       } else {
@@ -142,13 +208,13 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+    <Dialog open={isOpen} onOpenChange={handleDialogOpenChange}>
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent className="sm:max-w-md rounded-lg border bg-card p-6 shadow-none">
         <DialogHeader>
           <DialogTitle className="text-xl font-bold font-display">Add References</DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">
-            Paste links from Instagram, TikTok, YouTube, or upload saved exports.
+            Paste links from Instagram, TikTok, YouTube, X, Threads, or upload saved exports.
           </DialogDescription>
         </DialogHeader>
 
@@ -165,14 +231,41 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
           <TabsContent value="paste" className="mt-4 space-y-4">
             <form onSubmit={handlePasteSubmit} className="space-y-4">
               <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="add-links-textarea" className="label-mono text-muted-foreground">
+                    Post or Video URLs
+                  </label>
+                  <span
+                    className={`text-[11px] font-mono tabular-nums ${
+                      detectedUrlCount > 50 ? "text-warning font-bold" : "text-muted-foreground"
+                    }`}
+                  >
+                    {detectedUrlCount} / 50 per batch
+                  </span>
+                </div>
                 <Textarea
-                  placeholder="Paste URLs (one per line, up to 50 links) or share sheet text..."
+                  id="add-links-textarea"
+                  placeholder="Paste URLs (one per line, up to 50 links) or mobile share text..."
                   value={linksText}
-                  onChange={(e) => setLinksText(e.target.value)}
-                  className="min-h-[140px] rounded-lg border-input text-xs font-mono leading-relaxed"
+                  onChange={(e) => {
+                    setLinksText(e.target.value);
+                    if (invalidNote) setInvalidNote(null);
+                  }}
+                  className="min-h-[140px] rounded-md border-input text-xs font-mono leading-relaxed"
                   disabled={isSubmitting}
-                  autoFocus
                 />
+                {detectedUrlCount > 50 && (
+                  <p className="text-[11px] font-mono text-warning flex items-center gap-1.5">
+                    <AlertCircle className="size-3.5 shrink-0" />
+                    <span>{detectedUrlCount} links detected — only the first 50 will be processed at once.</span>
+                  </p>
+                )}
+                {invalidNote && (
+                  <p role="alert" className="text-[11px] font-mono text-destructive flex items-center gap-1.5">
+                    <AlertCircle className="size-3.5 shrink-0" />
+                    <span>{invalidNote}</span>
+                  </p>
+                )}
                 <p className="text-[11px] font-mono text-muted-foreground">
                   Tracking params (utm, igsh, si, etc.) are stripped automatically.
                 </p>
@@ -182,15 +275,16 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setIsOpen(false)}
-                  className="h-[34px] rounded-control text-xs font-mono uppercase tracking-wider"
+                  onClick={() => handleDialogOpenChange(false)}
+                  disabled={isSubmitting}
+                  className="h-9 rounded-md text-xs font-mono uppercase tracking-wider"
                 >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
                   disabled={isSubmitting || !linksText.trim()}
-                  className="h-[34px] rounded-control bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider"
+                  className="h-9 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider font-semibold"
                 >
                   {isSubmitting ? "Adding..." : "Add to Inbox"}
                 </Button>
@@ -200,17 +294,27 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
 
           <TabsContent value="file" className="mt-4 space-y-4">
             {!previewData ? (
-              <div className="border-2 border-dashed border-border rounded-lg p-6 text-center space-y-3 bg-muted/40">
+              <label
+                htmlFor="file-upload"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (!fileLoading) setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={handleFileDrop}
+                className={`block cursor-pointer border-2 border-dashed rounded-lg p-6 text-center space-y-3 transition-colors focus-within:ring-2 focus-within:ring-ring/40 ${
+                  isDragging
+                    ? "border-foreground bg-secondary/70"
+                    : "border-border bg-muted/40 hover:border-foreground/40"
+                }`}
+              >
                 <div className="mx-auto size-9 rounded-md bg-secondary flex items-center justify-center text-muted-foreground">
                   <Upload className="size-4" />
                 </div>
                 <div>
-                  <label
-                    htmlFor="file-upload"
-                    className="cursor-pointer text-xs font-semibold text-primary underline underline-offset-4"
-                  >
-                    Select an export file (.json, .html, .txt)
-                  </label>
+                  <span className="text-xs font-semibold text-primary underline underline-offset-4">
+                    Select or drop an export file (.json, .html, .txt, .csv)
+                  </span>
                   <input
                     id="file-upload"
                     type="file"
@@ -228,7 +332,7 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
                     Scanning file for video and post links...
                   </div>
                 )}
-              </div>
+              </label>
             ) : (
               <div className="space-y-4">
                 <div className="rounded-lg border bg-secondary/30 p-3.5 space-y-2">
@@ -246,13 +350,36 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
                   </div>
                 </div>
 
-                <div className="flex justify-between items-center pt-2">
+                {previewData.items.some((i) => i.status === "new") && (
+                  <div className="rounded-md border border-border/80 bg-background p-2.5 space-y-1 max-h-32 overflow-y-auto">
+                    <div className="label-mono text-muted-foreground pb-0.5">
+                      Preview (new links)
+                    </div>
+                    {previewData.items
+                      .filter((i) => i.status === "new")
+                      .slice(0, 6)
+                      .map((item) => (
+                        <div key={item.url} className="text-[11px] font-mono text-foreground truncate flex items-center gap-1.5">
+                          <LinkIcon className="size-3 shrink-0 text-muted-foreground" />
+                          <span className="truncate">{item.url}</span>
+                        </div>
+                      ))}
+                    {previewData.newCount > 6 && (
+                      <div className="text-[10px] font-mono text-muted-foreground pt-0.5">
+                        +{previewData.newCount - 6} more links ready
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap justify-between items-center gap-2 pt-2">
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
+                    disabled={isSubmitting}
                     onClick={() => setPreviewData(null)}
-                    className="text-xs font-mono text-muted-foreground"
+                    className="h-9 text-xs font-mono text-muted-foreground rounded-md"
                   >
                     Upload another file
                   </Button>
@@ -260,18 +387,17 @@ export function AddLinksDialog({ open, onOpenChange, children }: AddLinksDialogP
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
-                      onClick={() => setIsOpen(false)}
-                      className="text-xs font-mono uppercase tracking-wider"
+                      disabled={isSubmitting}
+                      onClick={() => handleDialogOpenChange(false)}
+                      className="h-9 rounded-md text-xs font-mono uppercase tracking-wider"
                     >
                       Cancel
                     </Button>
                     <Button
                       type="button"
-                      size="sm"
                       disabled={previewData.newCount === 0 || isSubmitting}
                       onClick={handleConfirmImport}
-                      className="bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider"
+                      className="h-9 rounded-md bg-primary text-primary-foreground text-xs font-mono uppercase tracking-wider font-semibold"
                     >
                       {isSubmitting ? "Importing..." : `Import ${previewData.newCount} New`}
                     </Button>

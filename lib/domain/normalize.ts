@@ -75,3 +75,32 @@ export function matchHookTypeId(
 
   return matched ? matched.id : null;
 }
+
+/**
+ * Builds the canonical external profile URL for a tracked creator handle.
+ */
+export function buildCreatorProfileUrl(
+  platformSlug: string,
+  handle: string
+): string | null {
+  const clean = normalizeHandle(handle);
+  if (!clean) return null;
+
+  switch (platformSlug) {
+    case "instagram":
+      return `https://www.instagram.com/${clean}/`;
+    case "tiktok":
+      return `https://www.tiktok.com/@${clean}`;
+    case "youtube":
+      return `https://www.youtube.com/@${clean}`;
+    case "x":
+    case "twitter":
+      return `https://x.com/${clean}`;
+    case "threads":
+      return `https://www.threads.net/@${clean}`;
+    case "facebook":
+      return `https://www.facebook.com/${clean}`;
+    default:
+      return null;
+  }
+}

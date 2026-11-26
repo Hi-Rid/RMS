@@ -22,6 +22,10 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -45,6 +49,7 @@
 
   --font-sans: var(--font-jbmono);
   --font-display: var(--font-archivo);
+  --font-heading: var(--font-archivo);
   --font-mono: var(--font-jbmono);
 
   --shadow-2xs: none;
@@ -88,8 +93,12 @@
   --accent: oklch(0.967 0.005 95.1);
   --accent-foreground: oklch(0.189 0.010 107.3);
   --destructive: oklch(0.5 0.182 29.5);
-  --border: oklch(0.928 0.006 264.5);
-  --input: oklch(0.928 0.006 264.5);
+  --brand: oklch(0.328 0.134 19.3);
+  --brand-foreground: oklch(1 0 0);
+  --warning: oklch(0.58 0.145 72);
+  --success: oklch(0.46 0.125 152);
+  --border: oklch(0.91 0.006 95);
+  --input: oklch(0.865 0.008 95);
   --ring: oklch(0.189 0.010 107.3);
   --tertiary: oklch(0.913 0.008 91.5);
 
@@ -143,6 +152,10 @@
     letter-spacing: 0.12em;
     text-transform: uppercase;
     line-height: 1.2;
+  }
+
+  .control-select {
+    @apply w-full h-9 px-2.5 text-xs font-mono bg-background border border-input rounded-md text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:border-foreground disabled:cursor-not-allowed disabled:opacity-50;
   }
 }
 

@@ -28,12 +28,14 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
+const SIDEBAR_COLLAPSE_KEY = "rms.sidebarCollapsed";
+
 const MOBILE_ROUTE_LABELS: [string, string][] = [
   ["/inbox/triage", "Inbox Triage"],
   ["/inbox", "Inbox"],
   ["/references", "References"],
   ["/contents/new", "New Content"],
-  ["/contents", "Contents"],
+  ["/contents", "Contents Studio"],
   ["/audio", "Audio"],
   ["/sources", "Sources"],
   ["/evaluate", "Evaluate"],
@@ -45,10 +47,44 @@ const MOBILE_ROUTE_LABELS: [string, string][] = [
 
 export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
   const pathname = usePathname();
+  const mainRef = React.useRef<HTMLElement>(null);
   const [commandOpen, setCommandOpen] = React.useState(false);
   const [addLinksOpen, setAddLinksOpen] = React.useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
+
+  // Restore sidebar collapse preference
+  React.useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SIDEBAR_COLLAPSE_KEY);
+      if (saved === "1") setSidebarCollapsed(true);
+    } catch {
+      // ignore storage failure
+    }
+  }, []);
+
+  const handleToggleSidebar = React.useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSE_KEY, next ? "1" : "0");
+      } catch {
+        // ignore storage failure
+      }
+      return next;
+    });
+  }, []);
+
+  // Reset viewport scroll on route transitions inside locked main container
+  React.useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [pathname]);
+
+  // Coordinate Sheet close -> Modal open to avoid Radix focus-trap collision
+  const openModalFromDrawer = React.useCallback((action: () => void) => {
+    setMobileMenuOpen(false);
+    window.setTimeout(action, 160);
+  }, []);
 
   const currentPageLabel = React.useMemo(() => {
     if (pathname === "/home") return "Home";
@@ -68,7 +104,7 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
           counts={counts}
           ownerEmail={ownerEmail}
           collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+          onToggleCollapse={handleToggleSidebar}
           onOpenCommand={() => setCommandOpen(true)}
           onOpenAddLinks={() => setAddLinksOpen(true)}
         />
@@ -78,24 +114,24 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
       <div className="flex-1 flex flex-col min-w-0 h-dvh overflow-hidden">
         {/* Mobile & Tablet Top Bar (< lg) */}
         <header className="lg:hidden h-14 border-b border-border bg-card px-3.5 flex items-center justify-between gap-2 shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
               <SheetTrigger asChild>
                 <button
                   type="button"
                   aria-label="Open navigation menu"
-                  className="relative size-9 shrink-0 rounded-md flex items-center justify-center border border-border bg-background hover:bg-secondary text-foreground transition-colors"
+                  className="relative size-9 shrink-0 rounded-md flex items-center justify-center border border-border bg-background hover:bg-secondary text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                 >
                   <Menu className="size-4" />
                   {hasAlerts && (
-                    <span className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-primary" />
+                    <span className="absolute top-1.5 right-1.5 size-1.5 rounded-sm bg-brand" />
                   )}
                 </button>
               </SheetTrigger>
               <SheetContent
                 side="left"
                 showCloseButton={false}
-                className="p-0 w-[280px] max-w-[85vw] border-r border-border bg-sidebar shadow-none"
+                className="p-0 w-[280px] max-w-[85vw] border-r border-border bg-card shadow-none"
               >
                 <SheetTitle className="sr-only">RMS Navigation Menu</SheetTitle>
                 <AppSidebar
@@ -103,26 +139,20 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
                   ownerEmail={ownerEmail}
                   onNavigate={() => setMobileMenuOpen(false)}
                   onClose={() => setMobileMenuOpen(false)}
-                  onOpenCommand={() => {
-                    setMobileMenuOpen(false);
-                    setCommandOpen(true);
-                  }}
-                  onOpenAddLinks={() => {
-                    setMobileMenuOpen(false);
-                    setAddLinksOpen(true);
-                  }}
+                  onOpenCommand={() => openModalFromDrawer(() => setCommandOpen(true))}
+                  onOpenAddLinks={() => openModalFromDrawer(() => setAddLinksOpen(true))}
                 />
               </SheetContent>
             </Sheet>
 
-            <Link href="/home" className="flex items-center gap-2 min-w-0">
-              <BrandLogo className="size-7" />
+            <Link href="/home" className="flex items-center gap-2 shrink-0">
+              <BrandLogo className="size-6 sm:size-7" />
               <span className="font-display font-black text-base tracking-tight text-foreground">
                 RMS
               </span>
             </Link>
 
-            <span className="hidden sm:inline-block text-xs font-mono text-muted-foreground border-l border-border pl-2.5 truncate">
+            <span className="text-xs font-mono text-muted-foreground border-l border-border pl-2 truncate">
               {currentPageLabel}
             </span>
           </div>
@@ -132,14 +162,14 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
               type="button"
               onClick={() => setCommandOpen(true)}
               aria-label="Quick search"
-              className="size-8 rounded-md flex items-center justify-center border border-border bg-background hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+              className="size-9 rounded-md flex items-center justify-center border border-border bg-background hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
             >
               <Search className="size-3.5" />
             </button>
             <Button
               size="sm"
               onClick={() => setAddLinksOpen(true)}
-              className="h-8 rounded-md bg-primary text-primary-foreground font-mono text-[11px] uppercase tracking-wider px-2.5"
+              className="h-9 rounded-md bg-foreground text-background hover:bg-foreground/90 font-mono text-[11px] uppercase tracking-wider px-2.5 font-semibold"
             >
               <Plus className="size-3.5 mr-1" />
               <span>Add</span>
@@ -148,14 +178,17 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
         </header>
 
         {/* Scrollable Content Viewport */}
-        <main className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable] w-full">
+        <main
+          ref={mainRef}
+          className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable] w-full"
+        >
           {children}
         </main>
 
         {/* Mobile Bottom Quick Navigation (< md) */}
         <nav
           aria-label="Mobile Quick Navigation"
-          className="md:hidden shrink-0 h-14 border-t border-border bg-card grid grid-cols-5 items-stretch"
+          className="md:hidden shrink-0 min-h-14 pb-[env(safe-area-inset-bottom)] border-t border-border bg-card grid grid-cols-5 items-stretch"
         >
           <MobileTab
             href="/home"
@@ -188,7 +221,7 @@ export function AppShell({ counts, ownerEmail, children }: AppShellProps) {
             icon={<CheckSquare className="size-4" />}
             badge={counts.evaluate}
             highlightBadge={counts.evaluate > 0}
-            active={pathname === "/evaluate"}
+            active={pathname === "/evaluate" || pathname.startsWith("/evaluate/")}
           />
         </nav>
       </div>
@@ -224,20 +257,21 @@ function MobileTab({
   return (
     <Link
       href={href}
+      aria-current={active ? "page" : undefined}
       className={cn(
-        "relative flex flex-col items-center justify-center gap-0.5 text-[10px] font-mono transition-colors",
+        "relative flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-mono transition-colors focus-visible:outline-none focus-visible:bg-secondary/60",
         active ? "text-foreground font-bold" : "text-muted-foreground hover:text-foreground"
       )}
     >
-      {active && <span className="absolute top-0 inset-x-4 h-0.5 bg-foreground rounded-b" />}
+      {active && <span className="absolute top-0 inset-x-3 h-0.5 bg-foreground rounded-b-sm" />}
       <div className="relative">
         {icon}
         {typeof badge === "number" && badge > 0 && (
           <span
             className={cn(
-              "absolute -top-1.5 -right-2.5 min-w-4 h-4 px-1 rounded-full text-[9px] font-mono font-bold flex items-center justify-center tabular-nums",
+              "absolute -top-1.5 -right-2.5 min-w-4 h-4 px-1 rounded-sm text-[9px] font-mono font-bold flex items-center justify-center tabular-nums",
               highlightBadge
-                ? "bg-destructive text-primary-foreground"
+                ? "bg-brand text-brand-foreground"
                 : "bg-foreground text-background"
             )}
           >

@@ -17,6 +17,13 @@ import { requireActionOwner } from "@/lib/auth/owner";
 import { recomputeContent } from "@/lib/domain/status";
 import { syncContentEmbedding } from "@/lib/ai/embeddings";
 
+const httpUrlSchema = z
+  .string()
+  .trim()
+  .refine((v) => /^https?:\/\/.+/i.test(v), "URL must start with http:// or https://")
+  .nullable()
+  .optional();
+
 const createContentSchema = z.object({
   title: z.string().min(1, "Title is required").max(200),
   formatId: z.string().uuid().nullable().optional(),
@@ -28,7 +35,7 @@ const createContentSchema = z.object({
   hookTypeId: z.string().uuid().nullable().optional(),
   notes: z.string().optional(),
   changesNote: z.string().optional(),
-  workUrl: z.string().url().nullable().optional(),
+  workUrl: httpUrlSchema,
   plannedFor: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
 });
@@ -181,7 +188,7 @@ const updateContentSchema = z.object({
   hookTypeId: z.string().uuid().nullable().optional(),
   notes: z.string().optional(),
   changesNote: z.string().optional(),
-  workUrl: z.string().nullable().optional(),
+  workUrl: httpUrlSchema,
   plannedFor: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
   finalRating: z.number().int().min(1).max(5).nullable().optional(),
@@ -554,6 +561,41 @@ export async function restoreContent(
   revalidatePath("/home");
 
   return ok({ id: parsed.data.id });
+}
+
+const bulkContentsSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(100),
+  action: z.enum(["archive", "restore"]),
+});
+
+/**
+ * Batch-archives or restores selected content studio drafts.
+ */
+export async function bulkUpdateContents(
+  input: z.infer<typeof bulkContentsSchema>
+): Promise<ActionResult<{ updatedCount: number }>> {
+  const user = await requireActionOwner();
+
+  const parsed = bulkContentsSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid bulk update payload");
+  }
+
+  const res = await db
+    .update(contents)
+    .set({
+      archivedAt: parsed.data.action === "archive" ? sql`now()` : null,
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(contents.userId, user.id), inArray(contents.id, parsed.data.ids)))
+    .returning({ id: contents.id });
+
+  revalidatePath("/contents");
+  revalidatePath("/home");
+  revalidatePath("/planner");
+  revalidatePath("/evaluate");
+
+  return ok({ updatedCount: res.length });
 }
 
 export async function deleteContentPermanently(

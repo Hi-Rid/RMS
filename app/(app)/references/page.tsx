@@ -1,12 +1,30 @@
+import * as React from "react";
 import Link from "next/link";
-import { listReferences, getMasterData } from "@/lib/queries/references";
+import {
+  listReferences,
+  getMasterData,
+  type ReferenceSortOption,
+} from "@/lib/queries/references";
+import { getSidebarCounts } from "@/lib/queries/home";
 import { ReferenceFilters } from "./reference-filters";
-import { ReferenceCard } from "@/components/app/reference-card";
-import { Bookmark, Plus, ChevronLeft, ChevronRight } from "lucide-react";
+import { ReferencesGridClient } from "@/components/app/references-grid-client";
+import { PageHeader } from "@/components/app/page-header";
+import { EmptyState } from "@/components/app/empty-state";
 import { AddLinksDialog } from "@/components/app/add-links-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  Bookmark,
+  Archive,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Sparkles,
+} from "lucide-react";
 
 export const instant = false;
+
+const PAGE_SIZE = 36;
 
 interface ReferencesPageProps {
   searchParams: Promise<{
@@ -14,146 +32,281 @@ interface ReferencesPageProps {
     pillar?: string;
     platform?: string;
     format?: string;
+    hookType?: string;
     unused?: string;
+    missing?: string;
     archived?: string;
     q?: string;
+    sort?: string;
     page?: string;
   }>;
 }
 
-const PAGE_SIZE = 36;
+function getPaginationRange(current: number, total: number): (number | "ellipsis")[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, idx) => idx + 1);
+  }
+  const pages = new Set<number>([1, total, current - 1, current, current + 1]);
+  const sorted = Array.from(pages)
+    .filter((p) => p >= 1 && p <= total)
+    .sort((a, b) => a - b);
+
+  const range: (number | "ellipsis")[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const pageNum = sorted[i];
+    if (i > 0 && pageNum - sorted[i - 1] > 1) {
+      range.push("ellipsis");
+    }
+    range.push(pageNum);
+  }
+  return range;
+}
 
 export default async function ReferencesPage({ searchParams }: ReferencesPageProps) {
-  const params = await searchParams;
-  const currentPage = Math.max(1, Number.parseInt(params.page || "1", 10) || 1);
+  const sp = await searchParams;
+  const status = sp.status || "all";
+  const pillarSlug = sp.pillar || "all";
+  const platformSlug = sp.platform || "all";
+  const formatSlug = sp.format || "all";
+  const hookTypeSlug = sp.hookType || "all";
+  const unusedOnly = sp.unused === "1";
+  const missingOnly = sp.missing === "1";
+  const archived = sp.archived === "1";
+  const query = sp.q || "";
+  const sort: ReferenceSortOption =
+    sp.sort === "oldest" || sp.sort === "updated" || sp.sort === "title"
+      ? sp.sort
+      : "recent";
+  const currentPage = Math.max(1, Number.parseInt(sp.page || "1", 10) || 1);
   const offset = (currentPage - 1) * PAGE_SIZE;
 
-  const [masterData, refsData] = await Promise.all([
+  const [masterData, result, counts] = await Promise.all([
     getMasterData(),
     listReferences({
-      status: params.status,
-      pillarSlug: params.pillar,
-      platformSlug: params.platform,
-      formatSlug: params.format,
-      unusedOnly: params.unused === "1",
-      archived: params.archived === "1",
-      searchText: params.q,
+      status,
+      pillarSlug,
+      platformSlug,
+      formatSlug,
+      hookTypeSlug,
+      unusedOnly,
+      missingOnly,
+      searchText: query,
+      archived,
+      sort,
       limit: PAGE_SIZE,
       offset,
     }),
+    getSidebarCounts(),
   ]);
 
-  const { items, total } = refsData;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIdx = result.total === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const endIdx = Math.min(safePage * PAGE_SIZE, result.total);
 
-  const buildPageHref = (pageNum: number) => {
-    const qp = new URLSearchParams();
-    if (params.status) qp.set("status", params.status);
-    if (params.pillar) qp.set("pillar", params.pillar);
-    if (params.platform) qp.set("platform", params.platform);
-    if (params.format) qp.set("format", params.format);
-    if (params.unused) qp.set("unused", params.unused);
-    if (params.archived) qp.set("archived", params.archived);
-    if (params.q) qp.set("q", params.q);
-    if (pageNum > 1) qp.set("page", String(pageNum));
-    const qs = qp.toString();
+  const hasFilters = Boolean(
+    status !== "all" ||
+      pillarSlug !== "all" ||
+      platformSlug !== "all" ||
+      formatSlug !== "all" ||
+      hookTypeSlug !== "all" ||
+      unusedOnly ||
+      missingOnly ||
+      archived ||
+      query.trim() ||
+      sort !== "recent"
+  );
+
+  const buildPageHref = (targetPage: number) => {
+    const p = new URLSearchParams();
+    if (status && status !== "all") p.set("status", status);
+    if (pillarSlug && pillarSlug !== "all") p.set("pillar", pillarSlug);
+    if (platformSlug && platformSlug !== "all") p.set("platform", platformSlug);
+    if (formatSlug && formatSlug !== "all") p.set("format", formatSlug);
+    if (hookTypeSlug && hookTypeSlug !== "all") p.set("hookType", hookTypeSlug);
+    if (unusedOnly) p.set("unused", "1");
+    if (missingOnly) p.set("missing", "1");
+    if (archived) p.set("archived", "1");
+    if (query.trim()) p.set("q", query.trim());
+    if (sort !== "recent") p.set("sort", sort);
+    if (targetPage > 1) p.set("page", String(targetPage));
+    const qs = p.toString();
     return qs ? `/references?${qs}` : "/references";
   };
 
+  const pageNumbers = getPaginationRange(safePage, totalPages);
+
   return (
     <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/80 pb-6">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-foreground font-display flex items-center gap-2.5">
-              <Bookmark className="size-6 text-foreground" />
-              <span>
-                {params.archived === "1" ? "Archived References" : "References Library"}
-              </span>
-            </h1>
-            <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-secondary text-foreground border border-border">
-              {total} {total === 1 ? "ref" : "refs"}
-            </span>
-          </div>
-          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            {params.archived === "1"
-              ? "Restore archived items back to active workflows"
-              : "Explore, filter and curate your content inspiration database"}
-          </p>
-        </div>
+      <PageHeader
+        icon={<Bookmark className="size-6 text-foreground" />}
+        title="References Library"
+        subtitle={
+          archived
+            ? "Archived items hidden from active triage and studio views."
+            : "All saved hooks, breakdowns, creators, and visual notes across platforms."
+        }
+        badge={
+          <span className="label-mono px-2 py-0.5 rounded-md bg-secondary text-foreground border border-border/80 tabular-nums">
+            {result.total} {result.total === 1 ? "item" : "items"}
+            {archived ? " · archived" : ""}
+          </span>
+        }
+        actions={
+          <>
+            {counts.inbox > 0 && (
+              <Button
+                asChild
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs font-mono rounded-md gap-1.5"
+              >
+                <Link href="/inbox/triage">
+                  <Sparkles className="size-3.5 text-brand" />
+                  <span>Triage Inbox ({counts.inbox})</span>
+                </Link>
+              </Button>
+            )}
+            <AddLinksDialog>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 text-xs font-mono font-semibold bg-brand text-primary-foreground hover:bg-brand/90 rounded-md gap-1.5"
+              >
+                <Plus className="size-3.5" />
+                <span>Add Links</span>
+              </Button>
+            </AddLinksDialog>
+          </>
+        }
+      />
 
-        <AddLinksDialog>
-          <Button
-            size="sm"
-            className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5"
-          >
-            <Plus className="size-3.5" />
-            <span>Add Links</span>
-          </Button>
-        </AddLinksDialog>
-      </div>
+      <ReferenceFilters masterData={masterData} counts={counts} />
 
-      {/* Filters */}
-      <ReferenceFilters masterData={masterData} />
-
-      {/* Grid of References */}
-      {items.length === 0 ? (
-        <div className="py-20 text-center rounded-lg border border-dashed border-border bg-card/40 space-y-3">
-          <Bookmark className="size-8 mx-auto text-muted-foreground/60" />
-          <div className="text-sm font-semibold text-foreground font-display">
-            No references found
-          </div>
-          <p className="text-xs font-mono text-muted-foreground max-w-sm mx-auto">
-            Try adjusting your status, platform, format, pillar or search filters to find what you&apos;re looking for.
-          </p>
-        </div>
+      {result.items.length === 0 ? (
+        archived ? (
+          <EmptyState
+            icon={<Archive className="size-5 text-muted-foreground" />}
+            title={hasFilters ? "No archived items match filters" : "Archive is empty"}
+            description="References you archive from Inbox or Library appear here and can be restored anytime."
+            primaryAction={{
+              label: "Back to Active Library",
+              href: "/references",
+            }}
+          />
+        ) : hasFilters ? (
+          <EmptyState
+            icon={<Search className="size-5 text-muted-foreground" />}
+            title="No references match your filters"
+            description="Try adjusting your search keywords, hook type, status tab, or pillar selections."
+            primaryAction={{
+              label: "Clear All Filters",
+              href: "/references",
+            }}
+          />
+        ) : (
+          <EmptyState
+            icon={<Bookmark className="size-5 text-muted-foreground" />}
+            title="No references saved yet"
+            description="Use Add Links above or open Inbox to paste post URLs from Instagram, TikTok, YouTube, X, or Threads."
+            primaryAction={{
+              label: "Go to Inbox",
+              href: "/inbox",
+            }}
+          />
+        )
       ) : (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-            {items.map((ref) => (
-              <ReferenceCard
-                key={ref.id}
-                reference={ref}
-                masterData={masterData}
-                showTriageActions={true}
-              />
-            ))}
-          </div>
+        <div className="space-y-6">
+          <ReferencesGridClient
+            items={result.items}
+            masterData={masterData}
+            isArchivedView={archived}
+          />
 
+          {/* Pagination Footer */}
           {totalPages > 1 && (
-            <div className="pt-4 border-t border-border/60 flex items-center justify-between gap-4 text-xs font-mono">
-              <span className="text-muted-foreground">
-                Showing {offset + 1}–{Math.min(offset + items.length, total)} of {total}
-              </span>
-              <div className="flex items-center gap-2">
-                {currentPage > 1 ? (
-                  <Link href={buildPageHref(currentPage - 1)}>
-                    <Button variant="outline" size="sm" className="h-8 px-2.5 text-xs font-mono gap-1">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-border/80">
+              <div className="text-xs font-mono text-muted-foreground tabular-nums">
+                Showing {startIdx}–{endIdx} of {result.total} references
+                <span className="text-muted-foreground/70">
+                  {" "}
+                  (Page {safePage} of {totalPages})
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1 flex-wrap">
+                {safePage > 1 ? (
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs font-mono rounded-md gap-1 px-2.5"
+                  >
+                    <Link href={buildPageHref(safePage - 1)}>
                       <ChevronLeft className="size-3.5" />
                       <span>Prev</span>
-                    </Button>
-                  </Link>
+                    </Link>
+                  </Button>
                 ) : (
-                  <Button variant="outline" size="sm" disabled className="h-8 px-2.5 text-xs font-mono gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled
+                    className="h-8 text-xs font-mono rounded-md gap-1 px-2.5"
+                  >
                     <ChevronLeft className="size-3.5" />
                     <span>Prev</span>
                   </Button>
                 )}
 
-                <span className="px-2 font-bold text-foreground">
-                  Page {currentPage} / {totalPages}
-                </span>
+                {pageNumbers.map((entry, idx) =>
+                  entry === "ellipsis" ? (
+                    <span
+                      key={`ellipsis-${idx}`}
+                      className="px-2 text-xs font-mono text-muted-foreground select-none"
+                    >
+                      …
+                    </span>
+                  ) : entry === safePage ? (
+                    <span
+                      key={entry}
+                      aria-current="page"
+                      className="h-8 min-w-8 px-2 inline-flex items-center justify-center rounded-md bg-foreground text-background text-xs font-mono font-bold tabular-nums"
+                    >
+                      {entry}
+                    </span>
+                  ) : (
+                    <Button
+                      key={entry}
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="h-8 min-w-8 px-2 text-xs font-mono rounded-md tabular-nums"
+                    >
+                      <Link href={buildPageHref(entry)}>{entry}</Link>
+                    </Button>
+                  )
+                )}
 
-                {currentPage < totalPages ? (
-                  <Link href={buildPageHref(currentPage + 1)}>
-                    <Button variant="outline" size="sm" className="h-8 px-2.5 text-xs font-mono gap-1">
+                {safePage < totalPages ? (
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs font-mono rounded-md gap-1 px-2.5"
+                  >
+                    <Link href={buildPageHref(safePage + 1)}>
                       <span>Next</span>
                       <ChevronRight className="size-3.5" />
-                    </Button>
-                  </Link>
+                    </Link>
+                  </Button>
                 ) : (
-                  <Button variant="outline" size="sm" disabled className="h-8 px-2.5 text-xs font-mono gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled
+                    className="h-8 text-xs font-mono rounded-md gap-1 px-2.5"
+                  >
                     <span>Next</span>
                     <ChevronRight className="size-3.5" />
                   </Button>
@@ -161,7 +314,7 @@ export default async function ReferencesPage({ searchParams }: ReferencesPagePro
               </div>
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );

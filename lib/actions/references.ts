@@ -126,7 +126,16 @@ export interface BatchItemResult {
  */
 export async function createReferencesFromText(
   input: z.infer<typeof createFromTextSchema>
-): Promise<ActionResult<{ results: BatchItemResult[]; totalProcessed: number; createdCount: number }>> {
+): Promise<
+  ActionResult<{
+    results: BatchItemResult[];
+    totalProcessed: number;
+    createdCount: number;
+    duplicateCount?: number;
+    invalidCount?: number;
+    truncatedCount?: number;
+  }>
+> {
   const user = await requireActionOwner();
 
   const parsed = createFromTextSchema.safeParse(input);
@@ -147,8 +156,11 @@ export async function createReferencesFromText(
 
   // Cap at 50 URLs
   const urlsToProcess = rawUrls.slice(0, 50);
+  const truncatedCount = Math.max(0, rawUrls.length - 50);
   const results: BatchItemResult[] = [];
   let createdCount = 0;
+  let duplicateCount = 0;
+  let invalidCount = 0;
   let enrichedBatchCount = 0;
 
   for (const raw of urlsToProcess) {
@@ -167,7 +179,9 @@ export async function createReferencesFromText(
       });
 
       let agentRes = null;
-      if (!record.isDuplicate) {
+      if (record.isDuplicate) {
+        duplicateCount++;
+      } else {
         createdCount++;
         if (enrichedBatchCount < 3) {
           enrichedBatchCount++;
@@ -198,6 +212,7 @@ export async function createReferencesFromText(
               : "Saved to inbox",
       });
     } catch {
+      invalidCount++;
       results.push({
         input: raw,
         status: "invalid",
@@ -217,6 +232,9 @@ export async function createReferencesFromText(
     results,
     totalProcessed: urlsToProcess.length,
     createdCount,
+    duplicateCount,
+    invalidCount,
+    truncatedCount,
   });
 }
 
@@ -724,69 +742,79 @@ export async function saveCapture(
 
     if (!currentRef) return fail("not_found", "Reference not found");
 
-    // 2. Handle Source Account if handle provided
-    let sourceAccountId: string | undefined = undefined;
-    if (sourceHandle && sourceHandle.trim()) {
-      const cleanHandle = normalizeHandle(sourceHandle);
-      if (cleanHandle) {
-        const [existingSource] = await tx
-          .select({ id: sourceAccounts.id })
-          .from(sourceAccounts)
+    // 2. Handle Source Account if handle field provided (empty clears link)
+    let sourceAccountId: string | null | undefined = undefined;
+    if (sourceHandle !== undefined) {
+      if (sourceHandle.trim()) {
+        const cleanHandle = normalizeHandle(sourceHandle);
+        if (cleanHandle) {
+          const [existingSource] = await tx
+            .select({ id: sourceAccounts.id })
+            .from(sourceAccounts)
+            .where(
+              and(
+                eq(sourceAccounts.userId, user.id),
+                eq(sourceAccounts.platformId, currentRef.platformId),
+                eq(sourceAccounts.handle, cleanHandle)
+              )
+            )
+            .limit(1);
+
+          if (existingSource) {
+            sourceAccountId = existingSource.id;
+          } else {
+            const [createdSource] = await tx
+              .insert(sourceAccounts)
+              .values({
+                userId: user.id,
+                platformId: currentRef.platformId,
+                handle: cleanHandle,
+              })
+              .returning({ id: sourceAccounts.id });
+            sourceAccountId = createdSource.id;
+          }
+        } else {
+          sourceAccountId = null;
+        }
+      } else {
+        sourceAccountId = null;
+      }
+    }
+
+    // 3. Handle Audio if title field provided (empty clears link)
+    let audioId: string | null | undefined = undefined;
+    if (audioTitle !== undefined) {
+      if (audioTitle.trim()) {
+        const cleanTitle = audioTitle.trim();
+        const cleanArtist = (audioArtist || "").trim();
+
+        const [existingAudio] = await tx
+          .select({ id: audios.id })
+          .from(audios)
           .where(
             and(
-              eq(sourceAccounts.userId, user.id),
-              eq(sourceAccounts.platformId, currentRef.platformId),
-              eq(sourceAccounts.handle, cleanHandle)
+              eq(audios.userId, user.id),
+              sql`lower(btrim(${audios.title})) = lower(btrim(${cleanTitle}))`,
+              sql`lower(btrim(${audios.artist})) = lower(btrim(${cleanArtist}))`
             )
           )
           .limit(1);
 
-        if (existingSource) {
-          sourceAccountId = existingSource.id;
+        if (existingAudio) {
+          audioId = existingAudio.id;
         } else {
-          const [createdSource] = await tx
-            .insert(sourceAccounts)
+          const [createdAudio] = await tx
+            .insert(audios)
             .values({
               userId: user.id,
-              platformId: currentRef.platformId,
-              handle: cleanHandle,
+              title: cleanTitle,
+              artist: cleanArtist,
             })
-            .returning({ id: sourceAccounts.id });
-          sourceAccountId = createdSource.id;
+            .returning({ id: audios.id });
+          audioId = createdAudio.id;
         }
-      }
-    }
-
-    // 3. Handle Audio if title provided
-    let audioId: string | undefined = undefined;
-    if (audioTitle && audioTitle.trim()) {
-      const cleanTitle = audioTitle.trim();
-      const cleanArtist = (audioArtist || "").trim();
-
-      const [existingAudio] = await tx
-        .select({ id: audios.id })
-        .from(audios)
-        .where(
-          and(
-            eq(audios.userId, user.id),
-            sql`lower(btrim(${audios.title})) = lower(btrim(${cleanTitle}))`,
-            sql`lower(btrim(${audios.artist})) = lower(btrim(${cleanArtist}))`
-          )
-        )
-        .limit(1);
-
-      if (existingAudio) {
-        audioId = existingAudio.id;
       } else {
-        const [createdAudio] = await tx
-          .insert(audios)
-          .values({
-            userId: user.id,
-            title: cleanTitle,
-            artist: cleanArtist,
-          })
-          .returning({ id: audios.id });
-        audioId = createdAudio.id;
+        audioId = null;
       }
     }
 
@@ -813,11 +841,11 @@ export async function saveCapture(
     if (formatId !== undefined) updateValues.formatId = formatId;
     if (sourceAccountId !== undefined) updateValues.sourceAccountId = sourceAccountId;
     if (audioId !== undefined) updateValues.audioId = audioId;
-    if (hookText !== undefined) updateValues.hookText = hookText;
+    if (hookText !== undefined) updateValues.hookText = hookText.trim() || null;
     if (hookTypeId !== undefined) updateValues.hookTypeId = hookTypeId;
-    if (visualNotes !== undefined) updateValues.visualNotes = visualNotes;
-    if (notes !== undefined) updateValues.notes = notes;
-    if (summary !== undefined) updateValues.summary = summary;
+    if (visualNotes !== undefined) updateValues.visualNotes = visualNotes.trim() || null;
+    if (notes !== undefined) updateValues.notes = notes.trim() || null;
+    if (summary !== undefined) updateValues.summary = summary.trim() || null;
 
     await tx
       .update(refs)
@@ -927,10 +955,10 @@ export async function saveBedah(
     const updateValues: Record<string, any> = {
       searchText: nextSearchText,
     };
-    if (hookText !== undefined) updateValues.hookText = hookText;
+    if (hookText !== undefined) updateValues.hookText = hookText.trim() || null;
     if (hookTypeId !== undefined) updateValues.hookTypeId = hookTypeId;
-    if (visualNotes !== undefined) updateValues.visualNotes = visualNotes;
-    if (notes !== undefined) updateValues.notes = notes;
+    if (visualNotes !== undefined) updateValues.visualNotes = visualNotes.trim() || null;
+    if (notes !== undefined) updateValues.notes = notes.trim() || null;
 
     await tx
       .update(refs)
@@ -967,5 +995,78 @@ export async function saveBedah(
   }
 
   return ok({ id });
+}
+
+const bulkRefsSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(100),
+  action: z.enum(["select", "skip", "archive", "restore"]),
+});
+
+/**
+ * Applies batch triage/archive transitions across selected references.
+ */
+export async function bulkUpdateReferences(
+  input: z.infer<typeof bulkRefsSchema>
+): Promise<ActionResult<{ updatedCount: number; skippedDueToLink: number }>> {
+  const user = await requireActionOwner();
+  const parsed = bulkRefsSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail("validation", parsed.error.issues[0]?.message || "Invalid bulk update payload");
+  }
+
+  const rows = await db
+    .select({ id: refs.id, status: refs.status, contentId: refs.contentId })
+    .from(refs)
+    .where(and(eq(refs.userId, user.id), inArray(refs.id, parsed.data.ids)));
+
+  if (rows.length === 0) {
+    return fail("not_found", "No matching references found");
+  }
+
+  let updatedCount = 0;
+  let skippedDueToLink = 0;
+
+  if (parsed.data.action === "archive" || parsed.data.action === "restore") {
+    const res = await db
+      .update(refs)
+      .set({ archivedAt: parsed.data.action === "archive" ? sql`now()` : null })
+      .where(and(eq(refs.userId, user.id), inArray(refs.id, rows.map((r) => r.id))))
+      .returning({ id: refs.id });
+    updatedCount = res.length;
+  } else {
+    const eligibleIds: string[] = [];
+    for (const r of rows) {
+      if (parsed.data.action === "skip" && Boolean(r.contentId)) {
+        skippedDueToLink++;
+        continue;
+      }
+      const nextStatus = parsed.data.action === "select" ? "selected" : "skipped";
+      if (isAllowedRefTransition(r.status, nextStatus, Boolean(r.contentId))) {
+        eligibleIds.push(r.id);
+      } else {
+        skippedDueToLink++;
+      }
+    }
+
+    if (eligibleIds.length > 0) {
+      const res = await db
+        .update(refs)
+        .set({
+          status: parsed.data.action === "select" ? "selected" : "skipped",
+          skippedReason: parsed.data.action === "select" ? null : undefined,
+          statusChangedAt: sql`now()`,
+        })
+        .where(and(eq(refs.userId, user.id), inArray(refs.id, eligibleIds)))
+        .returning({ id: refs.id });
+      updatedCount = res.length;
+    }
+  }
+
+  revalidatePath("/home");
+  revalidatePath("/inbox");
+  revalidatePath("/inbox/triage");
+  revalidatePath("/references");
+
+  return ok({ updatedCount, skippedDueToLink });
 }
 

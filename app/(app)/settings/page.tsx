@@ -29,6 +29,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
   );
 
   const appUrl = env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") || "http://localhost:3000";
+  const hasConfiguredAppUrl = Boolean(env.NEXT_PUBLIC_APP_URL?.trim());
 
   return (
     <SettingsClient
@@ -37,6 +38,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       systemLogs={logs}
       hasGeminiKey={hasGeminiKey}
       appUrl={appUrl}
+      hasConfiguredAppUrl={hasConfiguredAppUrl}
       initialTab={initialTab}
     />
   );

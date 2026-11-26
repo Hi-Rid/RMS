@@ -1,7 +1,10 @@
 import { connection } from "next/server";
+import Link from "next/link";
 import { getPlannerData } from "@/lib/queries/planner";
 import { PlannerClient } from "@/app/(app)/planner/planner-client";
-import { Calendar } from "lucide-react";
+import { PageHeader } from "@/components/app/page-header";
+import { Button } from "@/components/ui/button";
+import { Calendar, Plus, Settings } from "lucide-react";
 
 export const instant = false;
 
@@ -11,23 +14,36 @@ export default async function PlannerPage() {
 
   return (
     <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/80 pb-6">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-foreground font-display flex items-center gap-2.5">
-              <Calendar className="size-6 text-foreground" />
-              <span>Content Planner</span>
-            </h1>
-            <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-secondary text-foreground border border-border">
-              {data.scheduledContents.length} Scheduled
-            </span>
-          </div>
-          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            Weekly editorial schedule, publishing cadence & production calendar
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Content Planner"
+        subtitle="Weekly editorial schedule, publishing cadence & production calendar"
+        icon={<Calendar className="size-6 text-foreground" />}
+        badge={
+          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-secondary text-foreground border border-border tabular-nums">
+            {data.scheduledContents.length} Scheduled
+          </span>
+        }
+        actions={
+          <>
+            <Button asChild variant="outline" size="sm" className="text-xs font-mono h-8 rounded-md gap-1.5">
+              <Link href="/settings?tab=general">
+                <Settings className="size-3.5" />
+                <span>Weekly Goal</span>
+              </Link>
+            </Button>
+            <Button
+              asChild
+              size="sm"
+              className="text-xs font-mono h-8 rounded-md bg-foreground text-background hover:bg-foreground/90 font-bold gap-1.5"
+            >
+              <Link href="/contents/new">
+                <Plus className="size-3.5" />
+                <span>New Content</span>
+              </Link>
+            </Button>
+          </>
+        }
+      />
 
       <PlannerClient
         weeklyTarget={data.weeklyTarget}

@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { getInboxReferences, getMasterData } from "@/lib/queries/references";
-import { ReferenceCard } from "@/components/app/reference-card";
+import { listReferences, getMasterData } from "@/lib/queries/references";
+import { getAppSettings } from "@/lib/queries/settings";
+import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
-import { Inbox, Play, CheckCheck, Plus } from "lucide-react";
+import { Inbox, Play, Plus } from "lucide-react";
 import { AddLinksDialog } from "@/components/app/add-links-dialog";
 import { InboxBookmarkletIngest } from "@/components/app/inbox-bookmarklet-ingest";
 import { InboxEnrichButton } from "./inbox-enrich-button";
+import { InboxClient } from "./inbox-client";
 
 export const instant = false;
 
@@ -15,100 +17,87 @@ interface InboxPageProps {
 
 export default async function InboxPage({ searchParams }: InboxPageProps) {
   const params = await searchParams;
-  const [items, masterData] = await Promise.all([
-    getInboxReferences(),
+  const [inboxResult, masterData, settings] = await Promise.all([
+    listReferences({ status: "inbox", limit: 100 }),
     getMasterData(),
+    getAppSettings(),
   ]);
 
-  const count = items.length;
+  const items = inboxResult.items;
+  const totalCount = inboxResult.total;
+  const unenrichedCount = items.filter((i) => !i.summary || !i.hookText).length;
+  const aiKeyReady = Boolean(
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+      process.env.GEMINI_API_KEY ||
+      settings.hasPersonalAiKey
+  );
 
   return (
     <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
       <InboxBookmarkletIngest addUrl={params.add} />
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/80 pb-6">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-foreground font-display flex items-center gap-2.5">
-              <Inbox className="size-6 text-foreground" />
-              <span>Inbox</span>
-            </h1>
-            <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-foreground text-background">
-              {count} {count === 1 ? "item" : "items"}
-            </span>
-          </div>
-          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            Review, capture pillars & triage newly ingested references
-          </p>
-        </div>
+      <PageHeader
+        title="Inbox"
+        subtitle="Review, enrich metadata, assign pillars & triage newly ingested links"
+        icon={<Inbox className="size-6 text-foreground" />}
+        badge={
+          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-foreground text-background tabular-nums">
+            {totalCount} {totalCount === 1 ? "item" : "items"}
+          </span>
+        }
+        actions={
+          <>
+            {items.length > 0 && unenrichedCount > 0 && (
+              <InboxEnrichButton
+                unenrichedCount={unenrichedCount}
+                aiKeyReady={aiKeyReady}
+                aiEnabled={settings.aiEnabled}
+              />
+            )}
 
-        <div className="flex items-center gap-2 flex-wrap">
-          {count > 0 && <InboxEnrichButton />}
-
-          <AddLinksDialog>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-xs font-mono h-8 gap-1.5"
-            >
-              <Plus className="size-3.5" />
-              <span>Add Links</span>
-            </Button>
-          </AddLinksDialog>
-
-          {count > 0 && (
-            <Link href="/inbox/triage">
-              <Button
-                size="sm"
-                className="text-xs font-mono h-8 bg-foreground text-background hover:bg-foreground/90 font-bold gap-1.5"
-              >
-                <Play className="size-3.5 fill-current" />
-                <span>Start Triage</span>
-              </Button>
-            </Link>
-          )}
-        </div>
-      </div>
-
-      {/* Content */}
-      {count === 0 ? (
-        <div className="py-20 text-center rounded-lg border border-dashed border-border bg-card/50 space-y-4">
-          <div className="size-12 rounded-md bg-secondary flex items-center justify-center mx-auto text-muted-foreground border border-border">
-            <CheckCheck className="size-6" />
-          </div>
-          <div className="space-y-1 max-w-md mx-auto px-4">
-            <h3 className="text-sm font-black font-display tracking-tight text-foreground">
-              Inbox is Clear
-            </h3>
-            <p className="text-xs font-mono text-muted-foreground leading-relaxed">
-              No new references waiting for triage. Ingest links from your browser, iOS Shortcut, or paste links directly.
-            </p>
-          </div>
-          <div className="pt-2">
             <AddLinksDialog>
-              <Button
-                size="sm"
-                className="text-xs font-mono h-8 bg-foreground text-background font-bold"
-              >
-                <Plus className="size-3.5 mr-1.5" />
-                <span>Ingest References</span>
+              <Button variant="outline" size="sm" className="text-xs font-mono h-8 rounded-md gap-1.5">
+                <Plus className="size-3.5" />
+                <span>Batch / File</span>
               </Button>
             </AddLinksDialog>
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-          {items.map((ref) => (
-            <ReferenceCard
-              key={ref.id}
-              reference={ref}
-              masterData={masterData}
-              showTriageActions={true}
-            />
-          ))}
+
+            {items.length > 0 && (
+              <Button
+                asChild
+                size="sm"
+                className="text-xs font-mono h-8 rounded-md bg-brand text-brand-foreground hover:bg-brand/90 font-bold gap-1.5"
+              >
+                <Link href="/inbox/triage">
+                  <Play className="size-3.5 fill-current" />
+                  <span>Start Focus Triage</span>
+                </Link>
+              </Button>
+            )}
+          </>
+        }
+      />
+
+      {totalCount > items.length && (
+        <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg border border-border bg-secondary/40 text-xs font-mono">
+          <span className="text-muted-foreground">
+            Showing the newest {items.length} of {totalCount} inbox items.
+          </span>
+          <Link
+            href="/references?status=inbox"
+            className="font-semibold text-foreground underline underline-offset-4 hover:text-brand"
+          >
+            Browse all in References →
+          </Link>
         </div>
       )}
+
+      <InboxClient
+        items={items}
+        masterData={masterData}
+        aiKeyReady={aiKeyReady}
+        aiEnabled={settings.aiEnabled}
+      />
     </div>
   );
 }

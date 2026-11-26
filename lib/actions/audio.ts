@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { eq, sql, and, isNull } from "drizzle-orm";
+import { eq, sql, and, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { audios, refs, contents } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
@@ -83,6 +83,23 @@ export async function updateAudio(
   const { id, title, artist, isOriginal, notes } = parsed.data;
 
   try {
+    const [duplicate] = await db
+      .select({ id: audios.id })
+      .from(audios)
+      .where(
+        and(
+          eq(audios.userId, user.id),
+          ne(audios.id, id),
+          sql`lower(btrim(${audios.title})) = ${title.toLowerCase().trim()}`,
+          sql`lower(btrim(${audios.artist})) = ${artist.toLowerCase().trim()}`
+        )
+      )
+      .limit(1);
+
+    if (duplicate) {
+      return fail("conflict", "Another audio track with this title and artist already exists");
+    }
+
     const [updated] = await db
       .update(audios)
       .set({
@@ -101,6 +118,8 @@ export async function updateAudio(
 
     revalidatePath("/audio");
     revalidatePath(`/audio/${id}`);
+    revalidatePath("/contents");
+    revalidatePath("/references");
     return ok(undefined);
   } catch (error) {
     console.error("Update audio error:", error);

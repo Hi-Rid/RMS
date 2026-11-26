@@ -14,7 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/app/confirm-dialog";
+import { SelectField } from "@/components/app/select-field";
+import { useUnsavedChanges } from "@/lib/hooks/use-unsaved-changes";
 import { saveCapture } from "@/lib/actions/references";
 import { aiBedahReference } from "@/lib/actions/ai";
 import { matchHookTypeId } from "@/lib/domain/normalize";
@@ -50,43 +52,11 @@ export function CaptureSheet({
   const [notes, setNotes] = useState<string>("");
   const [tagsInput, setTagsInput] = useState<string>("");
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
 
-  const handleAiBedah = async () => {
-    if (!reference) return;
-    setIsAiLoading(true);
-    try {
-      const res = await aiBedahReference({
-        text: hookText || reference.summary || reference.url,
-        platform: reference.platform.name,
-      });
-
-      if (!res.ok) {
-        toast.error(res.error.message);
-        return;
-      }
-
-      setHookText(res.data.hookText);
-      setVisualNotes(res.data.visualNotes);
-      setNotes(
-        (prev) =>
-          `${prev ? prev + "\n\n" : ""}Key Insight: ${res.data.keyTakeaway}\n\nAdaptation Ideas:\n- ${res.data.adaptIdeas.join("\n- ")}`
-      );
-      const matchedHookId = matchHookTypeId(res.data.hookType, masterData?.hookTypes || []);
-      if (matchedHookId) setHookTypeId(matchedHookId);
-      if (res.data.suggestedTags?.length) {
-        setTagsInput(res.data.suggestedTags.join(", "));
-      }
-      toast.success("AI breakdown complete! Extracted hook & adaptation ideas.");
-    } catch {
-      toast.error("Failed to run AI Breakdown");
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  // Sync state when reference opens
+  // Sync state cleanly every time sheet opens on a reference
   React.useEffect(() => {
-    if (reference) {
+    if (isOpen && reference) {
       setSelectedPillars(reference.pillars.map((p) => p.id));
       setFormatId(reference.format?.id || "");
       setSourceHandle(reference.sourceAccount?.handle || "");
@@ -97,8 +67,87 @@ export function CaptureSheet({
       setVisualNotes(reference.visualNotes || "");
       setNotes(reference.notes || "");
       setTagsInput(reference.tags?.join(", ") || "");
+      setConfirmDiscardOpen(false);
     }
-  }, [reference]);
+  }, [reference, isOpen]);
+
+  const isDirty = React.useMemo(() => {
+    if (!reference || !isOpen) return false;
+    const origPillars = [...reference.pillars.map((p) => p.id)].sort().join(",");
+    const curPillars = [...selectedPillars].sort().join(",");
+    return (
+      origPillars !== curPillars ||
+      (reference.format?.id || "") !== formatId ||
+      (reference.sourceAccount?.handle || "") !== sourceHandle ||
+      (reference.audio?.title || "") !== audioTitle ||
+      (reference.audio?.artist || "") !== audioArtist ||
+      (reference.hookText || "") !== hookText ||
+      (reference.hookType?.id || "") !== hookTypeId ||
+      (reference.visualNotes || "") !== visualNotes ||
+      (reference.notes || "") !== notes ||
+      (reference.tags?.join(", ") || "") !== tagsInput
+    );
+  }, [
+    reference,
+    isOpen,
+    selectedPillars,
+    formatId,
+    sourceHandle,
+    audioTitle,
+    audioArtist,
+    hookText,
+    hookTypeId,
+    visualNotes,
+    notes,
+    tagsInput,
+  ]);
+
+  useUnsavedChanges(isDirty);
+
+  const handleRequestClose = (nextOpen: boolean) => {
+    if (!nextOpen && (isPending || isAiLoading)) return;
+    if (!nextOpen && isDirty) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
+    onOpenChange(nextOpen);
+  };
+
+  const handleAiBedah = async () => {
+    if (!reference) return;
+    setIsAiLoading(true);
+    try {
+      const res = await aiBedahReference({
+        refId: reference.id,
+        text: [reference.summary, hookText, visualNotes].filter(Boolean).join(" — ") || reference.url,
+        platform: reference.platform.name,
+      });
+
+      if (!res.ok) {
+        toast.error(res.error.message);
+        return;
+      }
+
+      setHookText(res.data.hookText);
+      setVisualNotes(res.data.visualNotes);
+      const aiBlock = `Key Insight: ${res.data.keyTakeaway}\n\nAdaptation Ideas:\n- ${res.data.adaptIdeas.join("\n- ")}`;
+      setNotes((prev) => {
+        if (!prev.trim()) return aiBlock;
+        if (prev.includes(`Key Insight: ${res.data.keyTakeaway}`)) return prev;
+        return `${prev.trim()}\n\n${aiBlock}`;
+      });
+      const matchedHookId = matchHookTypeId(res.data.hookType, masterData?.hookTypes || []);
+      if (matchedHookId) setHookTypeId(matchedHookId);
+      if (res.data.suggestedTags?.length) {
+        setTagsInput(res.data.suggestedTags.join(", "));
+      }
+      toast.success("AI breakdown complete! Review and save your changes.");
+    } catch {
+      toast.error("Failed to run AI Breakdown");
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
 
   if (!reference) return null;
 
@@ -119,13 +168,13 @@ export function CaptureSheet({
         id: reference.id,
         pillarIds: selectedPillars,
         formatId: formatId || null,
-        sourceHandle: sourceHandle || undefined,
-        audioTitle: audioTitle || undefined,
-        audioArtist: audioArtist || undefined,
-        hookText: hookText || undefined,
+        sourceHandle,
+        audioTitle,
+        audioArtist,
+        hookText,
         hookTypeId: hookTypeId || null,
-        visualNotes: visualNotes || undefined,
-        notes: notes || undefined,
+        visualNotes,
+        notes,
         tags,
       });
 
@@ -141,227 +190,273 @@ export function CaptureSheet({
   };
 
   return (
-    <Sheet open={isOpen} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto p-6 space-y-6">
-        <SheetHeader className="space-y-1">
-          <SheetTitle className="text-lg font-black tracking-tight font-display flex items-center justify-between">
-            <span>Quick Capture</span>
-            <a
-              href={reference.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs font-mono font-normal text-muted-foreground hover:text-foreground flex items-center gap-1"
-            >
-              <span>Original</span>
-              <ExternalLink className="size-3" />
-            </a>
-          </SheetTitle>
-          <SheetDescription className="text-xs font-mono truncate text-muted-foreground">
-            {reference.url}
-          </SheetDescription>
-        </SheetHeader>
+    <>
+      <Sheet open={isOpen} onOpenChange={handleRequestClose}>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-lg flex flex-col p-0 overflow-hidden"
+        >
+          <SheetHeader className="px-5 pt-5 pb-4 pr-12 border-b border-border/80 space-y-1 shrink-0">
+            <SheetTitle className="text-lg font-bold tracking-tight font-display flex items-center justify-between gap-2">
+              <span>Quick Capture</span>
+              <a
+                href={reference.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-mono font-normal text-muted-foreground hover:text-foreground inline-flex items-center gap-1 shrink-0"
+              >
+                <span>Original</span>
+                <ExternalLink className="size-3" />
+              </a>
+            </SheetTitle>
+            <SheetDescription className="text-xs font-mono truncate text-muted-foreground">
+              {reference.url}
+            </SheetDescription>
+          </SheetHeader>
 
-        <div className="space-y-5 text-xs">
-          {/* AI Breakdown Quick Button */}
-          <div className="p-3 rounded-lg border border-border bg-secondary/40 flex items-center justify-between gap-3">
-            <div className="space-y-0.5">
-              <span className="font-bold text-foreground font-display flex items-center gap-1.5 text-xs">
-                <Sparkles className="size-3.5 text-amber-500 fill-amber-500" />
-                <span>AI Auto-Breakdown</span>
-              </span>
-              <p className="text-[11px] font-mono text-muted-foreground">
-                Extract hook, visual breakdown & adaptation ideas automatically
-              </p>
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-5 text-xs">
+            {/* AI Breakdown Quick Button */}
+            <div className="p-3 rounded-lg border border-border bg-secondary/40 flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-0.5 min-w-0">
+                <span className="font-bold text-foreground font-display flex items-center gap-1.5 text-xs">
+                  <Sparkles className="size-3.5 text-warning fill-warning" />
+                  <span>AI Auto-Breakdown</span>
+                </span>
+                <p className="text-[11px] font-mono text-muted-foreground">
+                  Extract hook, visual breakdown &amp; adaptation ideas automatically
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                disabled={isAiLoading || isPending}
+                onClick={handleAiBedah}
+                className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1 shrink-0 rounded-md"
+              >
+                {isAiLoading ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Sparkles className="size-3" />
+                )}
+                <span>Auto-Breakdown</span>
+              </Button>
             </div>
-            <Button
-              type="button"
-              size="sm"
-              disabled={isAiLoading}
-              onClick={handleAiBedah}
-              className="text-xs font-mono h-7 bg-foreground text-background font-bold gap-1 shrink-0"
-            >
-              {isAiLoading ? (
-                <Loader2 className="size-3 animate-spin" />
+
+            {/* Content Pillars */}
+            <div className="space-y-2">
+              <Label className="label-mono text-muted-foreground">
+                Pillars (Select 1 or more)
+              </Label>
+              {masterData?.pillars && masterData.pillars.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {masterData.pillars.map((pillar) => {
+                    const isSelected = selectedPillars.includes(pillar.id);
+                    return (
+                      <button
+                        key={pillar.id}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() => togglePillar(pillar.id)}
+                        className={`px-2.5 py-1.5 text-xs font-mono rounded-md border transition-colors select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 ${
+                          isSelected
+                            ? "bg-foreground text-background border-foreground font-semibold"
+                            : "bg-secondary text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground"
+                        }`}
+                      >
+                        {pillar.name}
+                      </button>
+                    );
+                  })}
+                </div>
               ) : (
-                <Sparkles className="size-3" />
+                <p className="text-[11px] font-mono text-muted-foreground">
+                  No active pillars configured yet in Settings.
+                </p>
               )}
-              <span>Auto-Breakdown</span>
-            </Button>
-          </div>
-
-          {/* Content Pillars */}
-          <div className="space-y-2">
-            <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Pillars (Select 1 or more)
-            </Label>
-            <div className="flex flex-wrap gap-1.5">
-              {masterData?.pillars.map((pillar) => {
-                const isSelected = selectedPillars.includes(pillar.id);
-                return (
-                  <button
-                    key={pillar.id}
-                    type="button"
-                    onClick={() => togglePillar(pillar.id)}
-                    className={`px-2.5 py-1 text-xs font-mono rounded border transition-all select-none ${
-                      isSelected
-                        ? "bg-foreground text-background border-foreground font-semibold"
-                        : "bg-secondary text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground"
-                    }`}
-                  >
-                    {pillar.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Format & Hook Type */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Format
-              </Label>
-              <select
-                value={formatId}
-                onChange={(e) => setFormatId(e.target.value)}
-                className="w-full h-8 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
-              >
-                <option value="">-- Choose format --</option>
-                {masterData?.formats.map((fmt) => (
-                  <option key={fmt.id} value={fmt.id}>
-                    {fmt.name}
-                  </option>
-                ))}
-              </select>
             </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Hook Type
-              </Label>
-              <select
-                value={hookTypeId}
-                onChange={(e) => setHookTypeId(e.target.value)}
-                className="w-full h-8 px-2.5 text-xs font-mono bg-background border border-border rounded focus:outline-none focus:border-foreground"
-              >
-                <option value="">-- Choose hook type --</option>
-                {masterData?.hookTypes.map((ht) => (
-                  <option key={ht.id} value={ht.id}>
-                    {ht.name}
-                  </option>
-                ))}
-              </select>
+            {/* Format & Hook Type */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="capture-format" className="label-mono text-muted-foreground">
+                  Format
+                </Label>
+                <SelectField
+                  id="capture-format"
+                  value={formatId}
+                  onValueChange={setFormatId}
+                  ariaLabel="Format"
+                  options={[
+                    { value: "", label: "-- Choose format --" },
+                    ...(masterData?.formats.map((fmt) => ({ value: fmt.id, label: fmt.name })) || []),
+                  ]}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="capture-hook-type" className="label-mono text-muted-foreground">
+                  Hook Type
+                </Label>
+                <SelectField
+                  id="capture-hook-type"
+                  value={hookTypeId}
+                  onValueChange={setHookTypeId}
+                  ariaLabel="Hook Type"
+                  options={[
+                    { value: "", label: "-- Choose hook type --" },
+                    ...(masterData?.hookTypes.map((ht) => ({ value: ht.id, label: ht.name })) || []),
+                  ]}
+                />
+              </div>
             </div>
-          </div>
 
-          {/* Hook Text */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Hook / Opening Line
-            </Label>
-            <Input
-              value={hookText}
-              onChange={(e) => setHookText(e.target.value)}
-              placeholder="e.g. 90% of creators make this fatal mistake..."
-              className="text-xs h-8 font-mono"
-            />
-          </div>
-
-          {/* Source Account & Audio */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Hook Text */}
             <div className="space-y-1.5">
-              <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Creator Handle
+              <Label htmlFor="capture-hook-text" className="label-mono text-muted-foreground">
+                Hook / Opening Line
               </Label>
               <Input
-                value={sourceHandle}
-                onChange={(e) => setSourceHandle(e.target.value)}
-                placeholder="@username"
-                className="text-xs h-8 font-mono"
+                id="capture-hook-text"
+                value={hookText}
+                onChange={(e) => setHookText(e.target.value)}
+                placeholder="e.g. 90% of creators make this fatal mistake..."
+                className="text-xs h-9 font-mono rounded-md"
               />
             </div>
+
+            {/* Source Account & Audio */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="capture-creator-handle" className="label-mono text-muted-foreground">
+                  Creator Handle
+                </Label>
+                <Input
+                  id="capture-creator-handle"
+                  value={sourceHandle}
+                  onChange={(e) => setSourceHandle(e.target.value)}
+                  placeholder="@username"
+                  className="text-xs h-9 font-mono rounded-md"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="capture-audio-title" className="label-mono text-muted-foreground">
+                  Audio Title
+                </Label>
+                <Input
+                  id="capture-audio-title"
+                  value={audioTitle}
+                  onChange={(e) => setAudioTitle(e.target.value)}
+                  placeholder="Sound / Track"
+                  className="text-xs h-9 font-mono rounded-md"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="capture-audio-artist" className="label-mono text-muted-foreground">
+                  Audio Artist
+                </Label>
+                <Input
+                  id="capture-audio-artist"
+                  value={audioArtist}
+                  onChange={(e) => setAudioArtist(e.target.value)}
+                  placeholder="Artist / Handle"
+                  disabled={!audioTitle.trim()}
+                  className="text-xs h-9 font-mono rounded-md"
+                />
+              </div>
+            </div>
+
+            {/* Visual Breakdown */}
             <div className="space-y-1.5">
-              <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Audio Title
+              <Label htmlFor="capture-visual-notes" className="label-mono text-muted-foreground">
+                Visual Notes / Structure
+              </Label>
+              <Textarea
+                id="capture-visual-notes"
+                value={visualNotes}
+                onChange={(e) => setVisualNotes(e.target.value)}
+                placeholder="Pacing, cuts, framing, overlays, screen recording..."
+                rows={2}
+                className="text-xs font-mono resize-y rounded-md"
+              />
+            </div>
+
+            {/* Key Notes */}
+            <div className="space-y-1.5">
+              <Label htmlFor="capture-key-notes" className="label-mono text-muted-foreground">
+                Key Notes &amp; Takeaways
+              </Label>
+              <Textarea
+                id="capture-key-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Why this worked, what to adapt, ideas..."
+                rows={3}
+                className="text-xs font-mono resize-y rounded-md"
+              />
+            </div>
+
+            {/* Tags */}
+            <div className="space-y-1.5 pb-2">
+              <Label htmlFor="capture-tags" className="label-mono text-muted-foreground">
+                Tags (comma separated)
               </Label>
               <Input
-                value={audioTitle}
-                onChange={(e) => setAudioTitle(e.target.value)}
-                placeholder="Sound / Track name"
-                className="text-xs h-8 font-mono"
+                id="capture-tags"
+                value={tagsInput}
+                onChange={(e) => setTagsInput(e.target.value)}
+                placeholder="viral, storytelling, lighting, b-roll"
+                className="text-xs h-9 font-mono rounded-md"
               />
             </div>
           </div>
 
-          {/* Visual Breakdown */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Visual Notes / Structure
-            </Label>
-            <Textarea
-              value={visualNotes}
-              onChange={(e) => setVisualNotes(e.target.value)}
-              placeholder="Pacing, cuts, framing, overlays, screen recording..."
-              rows={2}
-              className="text-xs font-mono resize-none"
-            />
-          </div>
+          <SheetFooter className="px-5 py-3.5 border-t border-border bg-card flex flex-row items-center justify-between gap-2 shrink-0">
+            <span className="text-[11px] font-mono text-muted-foreground">
+              {isDirty ? "Unsaved changes" : "All saved"}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleRequestClose(false)}
+                disabled={isPending}
+                className="text-xs font-mono h-9 rounded-md"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSave}
+                disabled={isPending || isAiLoading}
+                className="text-xs font-mono h-9 bg-foreground text-background hover:bg-foreground/90 font-bold rounded-md"
+              >
+                {isPending ? (
+                  <>
+                    <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  "Save Capture"
+                )}
+              </Button>
+            </div>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
-          {/* Key Notes */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Key Notes & Takeaways
-            </Label>
-            <Textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Why this worked, what to adapt, ideas..."
-              rows={2}
-              className="text-xs font-mono resize-none"
-            />
-          </div>
-
-          {/* Tags */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Tags (comma separated)
-            </Label>
-            <Input
-              value={tagsInput}
-              onChange={(e) => setTagsInput(e.target.value)}
-              placeholder="viral, storytelling, lighting, b-roll"
-              className="text-xs h-8 font-mono"
-            />
-          </div>
-        </div>
-
-        <SheetFooter className="pt-4 border-t border-border flex flex-row items-center justify-end gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onOpenChange(false)}
-            disabled={isPending}
-            className="text-xs font-mono h-8"
-          >
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={isPending}
-            className="text-xs font-mono h-8 bg-foreground text-background hover:bg-foreground/90 font-bold"
-          >
-            {isPending ? (
-              <>
-                <Loader2 className="size-3 animate-spin mr-1.5" />
-                <span>Saving...</span>
-              </>
-            ) : (
-              <span>Save Capture</span>
-            )}
-          </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+      <ConfirmDialog
+        open={confirmDiscardOpen}
+        onOpenChange={setConfirmDiscardOpen}
+        title="Discard unsaved changes?"
+        description="You have edited capture details that haven't been saved yet."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        variant="destructive"
+        onConfirm={() => {
+          setConfirmDiscardOpen(false);
+          onOpenChange(false);
+        }}
+      />
+    </>
   );
 }

@@ -15,6 +15,7 @@ import {
   Inbox,
   Layers,
   LineChart,
+  Menu,
   Music,
   Play,
   Share2,
@@ -22,6 +23,7 @@ import {
   TrendingUp,
   Users,
   Wand2,
+  X,
 } from "lucide-react";
 import { BrandLogo } from "@/components/app/brand-logo";
 import { Button } from "@/components/ui/button";
@@ -128,9 +130,19 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
   const [demoTriageState, setDemoTriageState] = React.useState<"Approve" | "Save Ref" | "Skip" | null>(
     "Save Ref"
   );
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
 
   const activeDemo = AGENT_MODE_DEMOS[demoMode];
   const primaryAppHref = isAuthenticated ? "/home" : "/login?next=/home";
+
+  React.useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileMenuOpen]);
 
   const toggleCheck = (idx: number) => {
     setDemoChecks((prev) => prev.map((v, i) => (i === idx ? !v : v)));
@@ -138,6 +150,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
 
   const scrollToSection = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
     e.preventDefault();
+    setMobileMenuOpen(false);
     const el = document.getElementById(targetId);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -188,37 +201,102 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     {ownerEmail}
                   </span>
                 )}
-                <Link href="/home">
-                  <Button
-                    size="sm"
-                    className="h-8 rounded-md bg-[#800115] hover:bg-[#690111] text-white font-mono text-xs font-semibold gap-1.5 px-3.5"
-                  >
+                <Button
+                  asChild
+                  size="sm"
+                  className="h-8 rounded-md bg-brand hover:bg-brand/90 text-brand-foreground font-mono text-xs font-semibold gap-1.5 px-3.5"
+                >
+                  <Link href="/home">
                     <span>Open System</span>
                     <ArrowRight className="size-3.5" />
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
               </>
             ) : (
               <>
                 <Link
                   href="/login?next=/home"
-                  className="px-2.5 py-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors"
+                  className="hidden sm:inline-block px-2.5 py-1.5 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Sign In
                 </Link>
-                <Link href="/register?next=/home">
-                  <Button
-                    size="sm"
-                    className="h-8 rounded-md bg-foreground text-background hover:bg-foreground/90 font-mono text-xs font-semibold gap-1.5 px-3.5"
-                  >
+                <Button
+                  asChild
+                  size="sm"
+                  className="h-8 rounded-md bg-foreground text-background hover:bg-foreground/90 font-mono text-xs font-semibold gap-1.5 px-3.5"
+                >
+                  <Link href="/register?next=/home">
                     <span>Enter System</span>
                     <ArrowUpRight className="size-3.5" />
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
               </>
             )}
+
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+              aria-expanded={mobileMenuOpen}
+              onClick={() => setMobileMenuOpen((v) => !v)}
+              className="md:hidden size-8 rounded-md"
+            >
+              {mobileMenuOpen ? <X className="size-4" /> : <Menu className="size-4" />}
+            </Button>
           </div>
         </div>
+
+        {mobileMenuOpen && (
+          <nav
+            aria-label="Mobile Navigation"
+            className="md:hidden border-t border-border/80 bg-background px-4 py-3 space-y-1.5"
+          >
+            {[
+              { href: "#workflow", id: "workflow", label: "Workflow" },
+              { href: "#agent", id: "agent", label: "AI Agent" },
+              { href: "#system", id: "system", label: "Modules" },
+            ].map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                onClick={(e) => scrollToSection(e, item.id)}
+                className="block px-3 py-2 rounded-md text-xs font-mono text-foreground hover:bg-secondary/80 transition-colors"
+              >
+                {item.label}
+              </a>
+            ))}
+            <div className="pt-2 border-t border-border/60 flex items-center justify-between gap-2">
+              {isAuthenticated ? (
+                <Link
+                  href="/home"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full px-3 py-2 rounded-md bg-brand text-brand-foreground text-xs font-mono font-semibold flex items-center justify-between"
+                >
+                  <span>Open Workspace</span>
+                  <ArrowRight className="size-3.5" />
+                </Link>
+              ) : (
+                <>
+                  <Link
+                    href="/login?next=/home"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex-1 text-center px-3 py-2 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary"
+                  >
+                    Sign In
+                  </Link>
+                  <Link
+                    href="/register?next=/home"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex-1 text-center px-3 py-2 rounded-md bg-foreground text-background text-xs font-mono font-semibold"
+                  >
+                    Create Account
+                  </Link>
+                </>
+              )}
+            </div>
+          </nav>
+        )}
       </header>
 
       <main className="flex-1 pt-16">
@@ -247,7 +325,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
               ].map((pill) => (
                 <span
                   key={pill}
-                  className="px-3 py-1 rounded-md border border-border bg-card text-[11px] font-mono text-muted-foreground hover:border-foreground/40 hover:text-foreground transition-colors"
+                  className="px-3 py-1 rounded-md border border-border bg-card text-[11px] font-mono text-muted-foreground"
                 >
                   {pill}
                 </span>
@@ -288,8 +366,8 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                   strokeDasharray="4 4"
                 />
                 {/* Corner Architectural Crosshairs */}
-                <path d="M295 36 V48 M289 42 H301" stroke="#800115" strokeOpacity="0.45" strokeWidth="1.2" />
-                <path d="M805 36 V48 M799 42 H811" stroke="#800115" strokeOpacity="0.45" strokeWidth="1.2" />
+                <path d="M295 36 V48 M289 42 H301" stroke="var(--brand)" strokeOpacity="0.45" strokeWidth="1.2" />
+                <path d="M805 36 V48 M799 42 H811" stroke="var(--brand)" strokeOpacity="0.45" strokeWidth="1.2" />
                 <path d="M295 390 V402 M289 396 H301" stroke="var(--muted-foreground)" strokeOpacity="0.4" strokeWidth="1.2" />
                 <path d="M805 390 V402 M799 396 H811" stroke="var(--muted-foreground)" strokeOpacity="0.4" strokeWidth="1.2" />
               </svg>
@@ -299,7 +377,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                 {/* Top Left */}
                 <div className="absolute left-0 top-2 w-[210px] rounded-lg border border-border bg-card p-3.5 transition-colors hover:border-foreground/40">
                   <div className="flex items-center gap-2 mb-1.5">
-                    <span className="size-6 rounded-md bg-[#800115]/10 text-[#800115] flex items-center justify-center">
+                    <span className="size-6 rounded-md bg-brand/10 text-brand flex items-center justify-center">
                       <Share2 className="size-3.5" />
                     </span>
                     <span className="font-display font-bold text-xs text-foreground">
@@ -329,8 +407,8 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                 {/* Bottom Left */}
                 <div className="absolute left-4 bottom-3 w-[205px] rounded-lg border border-border bg-card p-3.5 transition-colors hover:border-foreground/40">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="label-mono text-[#800115]">BREAKDOWN</span>
-                    <Wand2 className="size-3.5 text-[#800115]" />
+                    <span className="label-mono text-brand">BREAKDOWN</span>
+                    <Wand2 className="size-3.5 text-brand" />
                   </div>
                   <p className="font-display font-bold text-xs text-foreground">
                     Hook &amp; Visual Breakdown
@@ -403,16 +481,16 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     />
                   </div>
 
-                  {/* GIANT DISPLAY TEXT IN #800115 — Keeps R, M, S crisp & readable */}
+                  {/* GIANT DISPLAY TEXT IN BRAND CRIMSON */}
                   <h1
-                    className="relative z-10 font-display font-black uppercase tracking-[-0.06em] leading-[0.82] text-[#800115] text-center"
+                    className="relative z-10 font-display font-black uppercase tracking-[-0.06em] leading-[0.82] text-brand text-center"
                     style={{ fontSize: "clamp(5.6rem, 19vw, 15.8rem)" }}
                   >
                     RMS
                   </h1>
                   <span
                     aria-hidden="true"
-                    className="relative z-10 font-display font-black text-[#800115] leading-none ml-1 sm:ml-2 mt-1 sm:mt-2"
+                    className="relative z-10 font-display font-black text-brand leading-none ml-1 sm:ml-2 mt-1 sm:mt-2"
                     style={{ fontSize: "clamp(1.6rem, 4.2vw, 3.8rem)" }}
                   >
                     ®
@@ -477,25 +555,27 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
               </p>
 
               <div className="flex flex-wrap items-center justify-center gap-3">
-                <Link href={primaryAppHref}>
-                  <Button
-                    size="lg"
-                    className="h-10 rounded-md bg-foreground text-background hover:bg-foreground/90 font-mono text-xs font-bold uppercase tracking-wider px-6 gap-2"
-                  >
+                <Button
+                  asChild
+                  size="lg"
+                  className="h-10 rounded-md bg-foreground text-background hover:bg-foreground/90 font-mono text-xs font-bold uppercase tracking-wider px-6 gap-2"
+                >
+                  <Link href={primaryAppHref}>
                     <span>{isAuthenticated ? "Open System" : "Start Using RMS"}</span>
                     <ArrowRight className="size-4" />
-                  </Button>
-                </Link>
-                <a href="#workflow">
-                  <Button
-                    variant="outline"
-                    size="lg"
-                    className="h-10 rounded-md border-border bg-card hover:bg-secondary font-mono text-xs font-semibold px-5 gap-2"
-                  >
-                    <Play className="size-3.5 text-[#800115]" />
+                  </Link>
+                </Button>
+                <Button
+                  asChild
+                  variant="outline"
+                  size="lg"
+                  className="h-10 rounded-md border-border bg-card hover:bg-secondary font-mono text-xs font-semibold px-5 gap-2"
+                >
+                  <a href="#workflow" onClick={(e) => scrollToSection(e, "workflow")}>
+                    <Play className="size-3.5 text-brand" />
                     <span>See How It Works</span>
-                  </Button>
-                </a>
+                  </a>
+                </Button>
               </div>
             </div>
 
@@ -527,7 +607,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                   key={card.title}
                   className="rounded-lg border border-border bg-card p-3.5 space-y-1"
                 >
-                  <div className="label-mono text-[#800115]">{card.tag}</div>
+                  <div className="label-mono text-brand">{card.tag}</div>
                   <div className="font-display font-bold text-sm text-foreground">
                     {card.title}
                   </div>
@@ -541,24 +621,42 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
             {/* Bottom Corner Editorial Status Bar */}
             <div className="mt-10 sm:mt-14 pt-5 border-t border-border/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px] font-mono text-muted-foreground">
               <div className="flex items-center gap-2">
-                <span className="size-2 rounded-[2px] bg-[#800115] shrink-0" />
+                <span className="size-2 rounded-[2px] bg-brand shrink-0" />
                 <span>
                   <strong className="text-foreground">Latest:</strong> Autonomous AI Content Agent + iOS Share Sheet Ingestion live.
                 </span>
               </div>
-              <div className="flex items-center gap-4">
-                <a href="#workflow" className="hover:text-foreground transition-colors">
+              <div className="flex items-center gap-4 flex-wrap">
+                <a
+                  href="#workflow"
+                  onClick={(e) => scrollToSection(e, "workflow")}
+                  className="hover:text-foreground transition-colors"
+                >
                   Workflow
                 </a>
-                <a href="#agent" className="hover:text-foreground transition-colors">
+                <a
+                  href="#agent"
+                  onClick={(e) => scrollToSection(e, "agent")}
+                  className="hover:text-foreground transition-colors"
+                >
                   AI Agent
                 </a>
-                <a href="#system" className="hover:text-foreground transition-colors">
+                <a
+                  href="#system"
+                  onClick={(e) => scrollToSection(e, "system")}
+                  className="hover:text-foreground transition-colors"
+                >
                   Modules
                 </a>
-                <Link href="/login?next=/home" className="hover:text-foreground transition-colors">
-                  Sign In
-                </Link>
+                {isAuthenticated ? (
+                  <Link href="/home" className="text-brand font-semibold hover:underline underline-offset-4">
+                    Open Workspace
+                  </Link>
+                ) : (
+                  <Link href="/login?next=/home" className="hover:text-foreground transition-colors">
+                    Sign In
+                  </Link>
+                )}
               </div>
             </div>
           </div>
@@ -569,7 +667,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
           <div className="max-w-7xl mx-auto px-4 sm:px-8 py-14 sm:py-20 space-y-10">
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
               <div className="space-y-2 max-w-2xl">
-                <div className="label-mono text-[#800115]">WHAT IS RMS?</div>
+                <div className="label-mono text-brand">WHAT IS RMS?</div>
                 <h2 className="text-2xl sm:text-4xl font-display font-black tracking-tight text-foreground">
                   From random scroll to shipped content—visually mapped.
                 </h2>
@@ -587,7 +685,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     <span className="px-2 py-0.5 rounded-md border border-border bg-secondary text-[10px] font-mono font-bold">
                       01 · CAPTURE
                     </span>
-                    <Share2 className="size-4 text-[#800115]" />
+                    <Share2 className="size-4 text-brand" />
                   </div>
                   <h3 className="font-display font-bold text-lg text-foreground">
                     Save in 1 Tap
@@ -600,7 +698,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                 <div className="rounded-md border border-border bg-background p-3 space-y-2.5">
                   <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
                     <span>iOS SHARE SHEET</span>
-                    <span className="text-[#800115] font-semibold">
+                    <span className="text-brand font-semibold">
                       {shareSimulated ? "INGESTED" : "READY"}
                     </span>
                   </div>
@@ -615,12 +713,13 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     </div>
                     <button
                       type="button"
+                      aria-pressed={shareSimulated}
                       onClick={() => setShareSimulated((v) => !v)}
                       className={cn(
                         "px-2 py-1 rounded text-[10px] font-mono font-bold transition-colors shrink-0",
                         shareSimulated
-                          ? "bg-emerald-600 text-white"
-                          : "bg-[#800115] text-white hover:bg-[#690111]"
+                          ? "bg-success text-white"
+                          : "bg-brand text-brand-foreground hover:bg-brand/90"
                       )}
                     >
                       {shareSimulated ? "Saved ✓" : "Send"}
@@ -636,7 +735,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     <span className="px-2 py-0.5 rounded-md border border-border bg-secondary text-[10px] font-mono font-bold">
                       02 · AI ENRICH
                     </span>
-                    <Sparkles className="size-4 text-[#800115]" />
+                    <Sparkles className="size-4 text-brand" />
                   </div>
                   <h3 className="font-display font-bold text-lg text-foreground">
                     Auto-Extracted DNA
@@ -649,7 +748,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                 <div className="rounded-md border border-border bg-background p-3 space-y-2">
                   <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground">
                     <span>AUTO-FILLED FIELDS</span>
-                    <span className="px-1.5 py-0.5 rounded bg-[#800115]/10 text-[#800115] font-semibold">
+                    <span className="px-1.5 py-0.5 rounded bg-brand/10 text-brand font-semibold">
                       AI
                     </span>
                   </div>
@@ -660,7 +759,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     <span className="px-1.5 py-0.5 rounded border border-border bg-card text-[10px] font-mono">
                       @visual.lab
                     </span>
-                    <span className="px-1.5 py-0.5 rounded bg-[#800115] text-white text-[10px] font-mono">
+                    <span className="px-1.5 py-0.5 rounded bg-brand text-brand-foreground text-[10px] font-mono">
                       Hook: Pattern
                     </span>
                     <span className="px-1.5 py-0.5 rounded border border-border bg-card text-[10px] font-mono">
@@ -677,7 +776,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     <span className="px-2 py-0.5 rounded-md border border-border bg-secondary text-[10px] font-mono font-bold">
                       03 · STUDIO
                     </span>
-                    <Layers className="size-4 text-[#800115]" />
+                    <Layers className="size-4 text-brand" />
                   </div>
                   <h3 className="font-display font-bold text-lg text-foreground">
                     Script &amp; Shoot
@@ -701,6 +800,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                         <button
                           key={item}
                           type="button"
+                          aria-pressed={done}
                           onClick={() => toggleCheck(idx)}
                           className="w-full flex items-center gap-2 text-left text-[11px] font-mono py-1 px-1.5 rounded hover:bg-secondary/60 transition-colors"
                         >
@@ -708,7 +808,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                             className={cn(
                               "size-3.5 rounded-[3px] border flex items-center justify-center shrink-0",
                               done
-                                ? "bg-[#800115] border-[#800115] text-white"
+                                ? "bg-brand border-brand text-brand-foreground"
                                 : "border-border bg-card"
                             )}
                           >
@@ -736,7 +836,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     <span className="px-2 py-0.5 rounded-md border border-border bg-secondary text-[10px] font-mono font-bold">
                       04 · OUTLIERS
                     </span>
-                    <LineChart className="size-4 text-[#800115]" />
+                    <LineChart className="size-4 text-brand" />
                   </div>
                   <h3 className="font-display font-bold text-lg text-foreground">
                     Measure &amp; Repeat
@@ -749,7 +849,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                 <div className="rounded-md border border-border bg-background p-3 space-y-2">
                   <div className="flex items-center justify-between text-[10px] font-mono">
                     <span className="text-muted-foreground">REACH VELOCITY</span>
-                    <span className="px-1.5 py-0.5 rounded bg-[#800115] text-white font-bold">
+                    <span className="px-1.5 py-0.5 rounded bg-brand text-brand-foreground font-bold">
                       4.8x OUTLIER
                     </span>
                   </div>
@@ -765,7 +865,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                             "w-full rounded-[3px] border",
                             bar.h,
                             bar.crimson
-                              ? "bg-[#800115] border-[#800115]"
+                              ? "bg-brand border-brand"
                               : "bg-secondary border-border"
                           )}
                         />
@@ -786,7 +886,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
           <div className="max-w-7xl mx-auto px-4 sm:px-8 py-14 sm:py-20">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
               <div className="lg:col-span-5 space-y-5">
-                <div className="label-mono text-[#800115]">AUTONOMOUS CREATOR AGENT</div>
+                <div className="label-mono text-brand">AUTONOMOUS CREATOR AGENT</div>
                 <h2 className="text-2xl sm:text-4xl font-display font-black tracking-tight text-foreground">
                   Set your Creator Persona. Let the system prep your next shoot.
                 </h2>
@@ -802,11 +902,12 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                       <button
                         key={modeKey}
                         type="button"
+                        aria-pressed={active}
                         onClick={() => setDemoMode(modeKey)}
                         className={cn(
                           "w-full text-left p-3.5 rounded-lg border transition-colors flex items-start justify-between gap-3",
                           active
-                            ? "bg-card border-[#800115]"
+                            ? "bg-card border-brand"
                             : "bg-background/70 border-border hover:border-foreground/30"
                         )}
                       >
@@ -815,7 +916,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                             <span
                               className={cn(
                                 "font-display font-bold text-sm",
-                                active ? "text-[#800115]" : "text-foreground"
+                                active ? "text-brand" : "text-foreground"
                               )}
                             >
                               {item.label}
@@ -831,7 +932,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                         <CheckCircle2
                           className={cn(
                             "size-4 shrink-0 mt-0.5",
-                            active ? "text-[#800115]" : "text-border"
+                            active ? "text-brand" : "text-border"
                           )}
                         />
                       </button>
@@ -844,16 +945,16 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
               <div className="lg:col-span-7 rounded-lg border border-border bg-card overflow-hidden">
                 <div className="px-4 py-3 border-b border-border bg-secondary/40 flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
-                    <span className="size-2 rounded-[2px] bg-[#800115]" />
+                    <span className="size-2 rounded-[2px] bg-brand" />
                     <span className="text-xs font-mono font-semibold text-foreground">
                       Share Pipeline · Visual Output Preview
                     </span>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="px-2 py-0.5 rounded-md border border-border bg-background text-[10px] font-mono text-muted-foreground">
                       Persona: Tech &amp; Workflow
                     </span>
-                    <span className="px-2 py-0.5 rounded-md border border-[#800115]/30 bg-[#800115]/10 text-[10px] font-mono text-[#800115] font-semibold">
+                    <span className="px-2 py-0.5 rounded-md border border-brand/30 bg-brand/10 text-[10px] font-mono text-brand font-semibold">
                       {activeDemo.label}
                     </span>
                   </div>
@@ -863,16 +964,16 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="rounded-md border border-border bg-background p-3 space-y-1.5">
                       <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                        <Share2 className="size-3 text-[#800115]" />
+                        <Share2 className="size-3 text-brand" />
                         <span>Shared Link + Caption</span>
                       </div>
-                      <div className="text-[11px] font-mono text-foreground break-all leading-relaxed">
+                      <div className="text-[11px] font-mono text-foreground break-words leading-relaxed">
                         &quot;Clean hook transition breakdown! https://vt.tiktok.com/... #editing&quot;
                       </div>
                     </div>
 
-                    <div className="rounded-md border border-[#800115]/40 bg-[#800115]/[0.03] p-3 space-y-1.5">
-                      <div className="text-[10px] font-mono uppercase tracking-wider text-[#800115] flex items-center gap-1.5 font-semibold">
+                    <div className="rounded-md border border-brand/40 bg-brand/[0.03] p-3 space-y-1.5">
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-brand flex items-center gap-1.5 font-semibold">
                         <Cpu className="size-3" />
                         <span>Generated Card Preview</span>
                       </div>
@@ -933,7 +1034,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
         <section id="system" className="scroll-mt-16 border-b border-border/80 bg-background">
           <div className="max-w-7xl mx-auto px-4 sm:px-8 py-14 sm:py-20 space-y-8">
             <div className="space-y-2">
-              <div className="label-mono text-[#800115]">MODULAR WORKSPACE</div>
+              <div className="label-mono text-brand">MODULAR WORKSPACE</div>
               <h2 className="text-2xl sm:text-3xl font-display font-black tracking-tight text-foreground">
                 Inside the Reference Management System.
               </h2>
@@ -959,11 +1060,12 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     <button
                       key={action}
                       type="button"
+                      aria-pressed={demoTriageState === action}
                       onClick={() => setDemoTriageState(action)}
                       className={cn(
                         "flex-1 py-1.5 rounded text-[10px] font-mono font-semibold border transition-colors",
                         demoTriageState === action
-                          ? "bg-[#800115] text-white border-[#800115]"
+                          ? "bg-brand text-brand-foreground border-brand"
                           : "bg-card text-muted-foreground border-border hover:text-foreground"
                       )}
                     >
@@ -982,19 +1084,19 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     </div>
                     <h3 className="font-display font-bold text-base">Reference Breakdown</h3>
                   </div>
-                  <Film className="size-4 text-[#800115]" />
+                  <Film className="size-4 text-brand" />
                 </div>
                 <p className="text-xs font-mono text-muted-foreground leading-relaxed">
                   Pinpoint the exact elements worth adapting—hook phrasing, pacing cuts, visuals, or topic angle.
                 </p>
                 <div className="rounded-md border border-border bg-background p-2.5 space-y-2">
                   <div className="h-2 w-full rounded-sm bg-secondary overflow-hidden flex">
-                    <div className="w-[22%] bg-[#800115]" />
+                    <div className="w-[22%] bg-brand" />
                     <div className="w-[53%] bg-foreground" />
                     <div className="w-[25%] bg-muted-foreground/40" />
                   </div>
                   <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
-                    <span className="text-[#800115] font-semibold">0–3s Hook</span>
+                    <span className="text-brand font-semibold">0–3s Hook</span>
                     <span>Body Beats</span>
                     <span>Payoff / CTA</span>
                   </div>
@@ -1010,7 +1112,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     </div>
                     <h3 className="font-display font-bold text-base">Studio &amp; Planner</h3>
                   </div>
-                  <span className="text-[10px] font-mono text-[#800115] font-semibold">WEEKLY</span>
+                  <span className="text-[10px] font-mono text-brand font-semibold">WEEKLY</span>
                 </div>
                 <p className="text-xs font-mono text-muted-foreground leading-relaxed">
                   Keep production moving cleanly from script draft to planned publish slots without missed deadlines.
@@ -1028,7 +1130,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                       className={cn(
                         "py-1.5 rounded border text-[10px] font-mono",
                         d.active
-                          ? "bg-[#800115] text-white border-[#800115] font-bold"
+                          ? "bg-brand text-brand-foreground border-brand font-bold"
                           : "bg-card text-muted-foreground border-border"
                       )}
                     >
@@ -1060,7 +1162,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                         style={{ height: `${h}px` }}
                         className={cn(
                           "w-1 rounded-xs",
-                          i % 2 === 0 ? "bg-[#800115]" : "bg-foreground"
+                          i % 2 === 0 ? "bg-brand" : "bg-foreground"
                         )}
                       />
                     ))}
@@ -1104,14 +1206,14 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
                     </div>
                     <h3 className="font-display font-bold text-base">Outlier Insights</h3>
                   </div>
-                  <Sparkles className="size-4 text-[#800115]" />
+                  <Sparkles className="size-4 text-brand" />
                 </div>
                 <p className="text-xs font-mono text-muted-foreground leading-relaxed">
                   AI reads across your 24h, 7d, and 30d checkpoints to tell you why top posts outperformed.
                 </p>
-                <div className="rounded-md border border-border bg-background p-2.5 flex items-center justify-between text-[10px] font-mono">
+                <div className="rounded-md border border-border bg-background p-2.5 flex items-center justify-between text-[10px] font-mono gap-2">
                   <span className="text-muted-foreground">Top Pattern:</span>
-                  <span className="px-2 py-0.5 rounded bg-[#800115] text-white font-bold">
+                  <span className="px-2 py-0.5 rounded bg-brand text-brand-foreground font-bold truncate">
                     Visual Question + Fast Cut
                   </span>
                 </div>
@@ -1127,7 +1229,7 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
               <div className="space-y-2.5 max-w-xl">
                 <div className="flex items-center gap-2">
                   <BrandLogo className="size-6" />
-                  <span className="label-mono text-[#800115]">
+                  <span className="label-mono text-brand">
                     READY TO SHIP DELIBERATELY
                   </span>
                 </div>
@@ -1140,25 +1242,25 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
               </div>
 
               <div className="flex flex-wrap items-center gap-3 shrink-0">
-                <Link href={primaryAppHref}>
-                  <Button
-                    size="lg"
-                    className="h-10 rounded-md bg-[#800115] hover:bg-[#690111] text-white font-mono text-xs font-bold uppercase tracking-wider px-6 gap-2"
-                  >
+                <Button
+                  asChild
+                  size="lg"
+                  className="h-10 rounded-md bg-brand hover:bg-brand/90 text-brand-foreground font-mono text-xs font-bold uppercase tracking-wider px-6 gap-2"
+                >
+                  <Link href={primaryAppHref}>
                     <span>{isAuthenticated ? "Open System" : "Enter RMS"}</span>
                     <ArrowRight className="size-4" />
-                  </Button>
-                </Link>
-                {!isAuthenticated && (
-                  <Link href="/register?next=/home">
-                    <Button
-                      variant="outline"
-                      size="lg"
-                      className="h-10 rounded-md border-border bg-background font-mono text-xs font-semibold px-5"
-                    >
-                      Create Account
-                    </Button>
                   </Link>
+                </Button>
+                {!isAuthenticated && (
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="lg"
+                    className="h-10 rounded-md border-border bg-background font-mono text-xs font-semibold px-5"
+                  >
+                    <Link href="/register?next=/home">Create Account</Link>
+                  </Button>
                 )}
               </div>
             </div>
@@ -1177,12 +1279,25 @@ export function LandingPage({ isAuthenticated, ownerEmail }: LandingPageProps) {
             <Link href="/home" className="hover:text-foreground transition-colors">
               Workspace
             </Link>
-            <Link href="/login?next=/home" className="hover:text-foreground transition-colors">
-              Sign In
-            </Link>
-            <Link href="/register?next=/home" className="hover:text-foreground transition-colors">
-              Register
-            </Link>
+            {isAuthenticated ? (
+              <>
+                <Link href="/inbox" className="hover:text-foreground transition-colors">
+                  Inbox
+                </Link>
+                <Link href="/settings" className="hover:text-foreground transition-colors">
+                  Settings
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link href="/login?next=/home" className="hover:text-foreground transition-colors">
+                  Sign In
+                </Link>
+                <Link href="/register?next=/home" className="hover:text-foreground transition-colors">
+                  Register
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </footer>

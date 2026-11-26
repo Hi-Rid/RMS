@@ -1,18 +1,23 @@
 import Link from "next/link";
-import { listContents, getStudioMasterOptions } from "@/lib/queries/contents";
+import {
+  listContents,
+  getStudioMasterOptions,
+  getContentCounts,
+  type ContentSortOption,
+} from "@/lib/queries/contents";
 import { getMasterData } from "@/lib/queries/references";
 import { ContentFilters } from "./content-filters";
-import { StatusBadge } from "@/components/app/status-badge";
+import { ContentsViewClient } from "@/components/app/contents-view-client";
+import { EmptyState } from "@/components/app/empty-state";
+import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import {
   FileVideo,
   Plus,
-  CheckSquare,
-  Link as LinkIcon,
-  Send,
   Calendar,
   ChevronLeft,
   ChevronRight,
+  RotateCcw,
 } from "lucide-react";
 
 export const instant = false;
@@ -23,36 +28,92 @@ interface ContentsPageProps {
     pillar?: string;
     format?: string;
     series?: string;
+    hookType?: string;
+    planned?: string;
     archived?: string;
     q?: string;
+    sort?: string;
     page?: string;
   }>;
 }
 
 const PAGE_SIZE = 30;
 
+function getPaginationRange(current: number, total: number): (number | "ellipsis")[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, idx) => idx + 1);
+  }
+  const pages = new Set<number>([1, total, current - 1, current, current + 1]);
+  const sorted = Array.from(pages)
+    .filter((p) => p >= 1 && p <= total)
+    .sort((a, b) => a - b);
+
+  const range: (number | "ellipsis")[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const pageNum = sorted[i];
+    if (i > 0 && pageNum - sorted[i - 1] > 1) {
+      range.push("ellipsis");
+    }
+    range.push(pageNum);
+  }
+  return range;
+}
+
 export default async function ContentsPage({ searchParams }: ContentsPageProps) {
   const params = await searchParams;
   const currentPage = Math.max(1, Number.parseInt(params.page || "1", 10) || 1);
   const offset = (currentPage - 1) * PAGE_SIZE;
 
-  const [masterData, studioOptions, contentsData] = await Promise.all([
+  const archived = params.archived === "1";
+  const plannedFilter =
+    params.planned === "scheduled" || params.planned === "unscheduled"
+      ? params.planned
+      : "all";
+  const sort: ContentSortOption =
+    params.sort === "updated" ||
+    params.sort === "planned" ||
+    params.sort === "oldest" ||
+    params.sort === "title" ||
+    params.sort === "rating"
+      ? params.sort
+      : "recent";
+
+  const [masterData, studioOptions, counts, contentsData] = await Promise.all([
     getMasterData(),
     getStudioMasterOptions(),
+    getContentCounts(),
     listContents({
       status: params.status,
       pillarSlug: params.pillar,
       formatSlug: params.format,
       seriesId: params.series,
-      archived: params.archived === "1",
+      hookTypeSlug: params.hookType,
+      plannedFilter,
+      archived,
       searchText: params.q,
+      sort,
       limit: PAGE_SIZE,
       offset,
     }),
   ]);
 
+  // Evaluated strictly after dynamic queries to satisfy Next.js cacheComponents
+  const todayIso = new Date().toISOString().slice(0, 10);
+
   const { items, total } = contentsData;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const hasFilters = Boolean(
+    params.status ||
+      params.pillar ||
+      params.format ||
+      params.series ||
+      params.hookType ||
+      plannedFilter !== "all" ||
+      archived ||
+      params.q ||
+      sort !== "recent"
+  );
 
   const buildPageHref = (pageNum: number) => {
     const qp = new URLSearchParams();
@@ -60,212 +121,208 @@ export default async function ContentsPage({ searchParams }: ContentsPageProps) 
     if (params.pillar) qp.set("pillar", params.pillar);
     if (params.format) qp.set("format", params.format);
     if (params.series) qp.set("series", params.series);
-    if (params.archived) qp.set("archived", params.archived);
+    if (params.hookType) qp.set("hookType", params.hookType);
+    if (plannedFilter !== "all") qp.set("planned", plannedFilter);
+    if (archived) qp.set("archived", "1");
     if (params.q) qp.set("q", params.q);
+    if (sort !== "recent") qp.set("sort", sort);
     if (pageNum > 1) qp.set("page", String(pageNum));
     const qs = qp.toString();
     return qs ? `/contents?${qs}` : "/contents";
   };
 
+  const pageNumbers = getPaginationRange(safePage, totalPages);
+
   return (
     <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-8 lg:px-10 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/80 pb-6">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-foreground font-display flex items-center gap-2.5">
-              <FileVideo className="size-6 text-foreground" />
-              <span>
-                {params.archived === "1" ? "Archived Contents" : "Contents Studio"}
-              </span>
-            </h1>
-            <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-secondary text-foreground border border-border">
-              {total} {total === 1 ? "content" : "contents"}
-            </span>
-          </div>
-          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            {params.archived === "1"
-              ? "Open any archived content studio to restore or delete permanently"
-              : "Plan, script, produce, and track your content pipeline"}
-          </p>
-        </div>
-
-        <Link href="/contents/new">
-          <Button
-            size="sm"
-            className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5"
-          >
-            <Plus className="size-3.5" />
-            <span>New Content</span>
-          </Button>
-        </Link>
-      </div>
+      <PageHeader
+        title={archived ? "Archived Contents" : "Contents Studio"}
+        subtitle={
+          archived
+            ? "Restore archived content drafts or permanently delete unused studio entries."
+            : "Plan, script, track shoot checklists, and publish across platforms."
+        }
+        icon={<FileVideo className="size-6 text-foreground" />}
+        badge={
+          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-secondary text-foreground border border-border tabular-nums">
+            {total} {total === 1 ? "content" : "contents"}
+            {!archived && counts.scheduled > 0 ? ` · ${counts.scheduled} planned` : ""}
+          </span>
+        }
+        actions={
+          <>
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs font-mono rounded-md gap-1.5"
+            >
+              <Link href="/planner">
+                <Calendar className="size-3.5 text-muted-foreground" />
+                <span>Planner</span>
+              </Link>
+            </Button>
+            <Button
+              asChild
+              size="sm"
+              className="text-xs font-mono h-8 rounded-md bg-brand text-primary-foreground hover:bg-brand/90 font-bold gap-1.5"
+            >
+              <Link href="/contents/new">
+                <Plus className="size-3.5" />
+                <span>New Content</span>
+              </Link>
+            </Button>
+          </>
+        }
+      />
 
       {/* Filters */}
-      <ContentFilters masterData={masterData} seriesList={studioOptions.series} />
+      <ContentFilters
+        masterData={masterData}
+        seriesList={studioOptions.series}
+        counts={counts}
+      />
 
-      {/* Grid of Content Cards */}
+      {/* Empty States or Content Views */}
       {items.length === 0 ? (
-        <div className="py-20 text-center rounded-lg border border-dashed border-border bg-card/40 space-y-4">
-          <FileVideo className="size-10 mx-auto text-muted-foreground/60" />
-          <div className="space-y-1 max-w-sm mx-auto px-4">
-            <h3 className="text-sm font-bold font-display text-foreground">
-              {params.archived === "1" ? "No Archived Contents" : "No Content Found"}
-            </h3>
-            <p className="text-xs font-mono text-muted-foreground">
-              {params.archived === "1"
-                ? "Archived content pieces will appear here."
-                : "Adjust your filters or create a new content piece to start producing."}
-            </p>
-          </div>
-          {params.archived !== "1" && (
-            <Link href="/contents/new">
-              <Button
-                size="sm"
-                className="text-xs font-mono h-8 bg-foreground text-background font-bold gap-1.5"
-              >
-                <Plus className="size-3.5" />
-                <span>Create New Content</span>
-              </Button>
-            </Link>
-          )}
-        </div>
+        total > 0 && currentPage > totalPages ? (
+          <EmptyState
+            icon={<FileVideo className="size-5" />}
+            title={`Page ${currentPage} is empty`}
+            description={`There are ${total} matching content pieces across ${totalPages} page${totalPages > 1 ? "s" : ""}.`}
+            primaryAction={{
+              label: "Jump to Page 1",
+              href: buildPageHref(1),
+            }}
+          />
+        ) : hasFilters ? (
+          <EmptyState
+            icon={<FileVideo className="size-5" />}
+            title={archived ? "No Archived Contents" : "No Matching Contents"}
+            description={
+              archived
+                ? "No archived content pieces match your current filters."
+                : "No content pieces match your current stage, hook, schedule, pillar, or search filters."
+            }
+            primaryAction={{
+              label: "Clear All Filters",
+              href: "/contents",
+              icon: <RotateCcw className="size-3.5" />,
+            }}
+            secondaryAction={{
+              label: "Create New Content",
+              href: "/contents/new",
+              icon: <Plus className="size-3.5" />,
+            }}
+          />
+        ) : (
+          <EmptyState
+            icon={<FileVideo className="size-5" />}
+            title="Start Your First Content Piece"
+            description="Create an original draft or adapt a curated reference into a structured script and shoot checklist."
+            primaryAction={{
+              label: "Create New Content",
+              href: "/contents/new",
+              icon: <Plus className="size-3.5" />,
+            }}
+            secondaryAction={{
+              label: "Pick from References",
+              href: "/references?status=selected",
+            }}
+          />
+        )
       ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {items.map((content) => {
-              const hasChecklist = content.checklistStats.total > 0;
-              const checklistDone =
-                hasChecklist &&
-                content.checklistStats.done === content.checklistStats.total;
-
-              return (
-                <Link
-                  key={content.id}
-                  href={`/contents/${content.id}`}
-                  className="group bg-card border border-border rounded-md p-5 space-y-3.5 transition-all hover:border-foreground/40 flex flex-col justify-between"
-                >
-                  <div className="space-y-3">
-                    {/* Top Badges */}
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {content.format && (
-                          <span className="text-[11px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground border border-border font-bold">
-                            {content.format.name}
-                          </span>
-                        )}
-                        {content.series && (
-                          <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground border border-border/60">
-                            {content.series.name}
-                          </span>
-                        )}
-                      </div>
-                      <StatusBadge status={content.status} size="sm" />
-                    </div>
-
-                    {/* Title & Hook */}
-                    <div className="space-y-1">
-                      <h3 className="text-sm font-black font-display tracking-tight text-foreground group-hover:underline underline-offset-2 line-clamp-2">
-                        {content.title}
-                      </h3>
-                      {content.hookText && (
-                        <p className="text-xs font-mono text-muted-foreground line-clamp-2">
-                          &ldquo;{content.hookText}&rdquo;
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Pillars */}
-                    {content.pillars.length > 0 && (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {content.pillars.map((pillar) => (
-                          <span
-                            key={pillar.id}
-                            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-secondary/80 text-foreground border border-border/80 font-medium"
-                          >
-                            {pillar.name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Footer Stats */}
-                  <div className="pt-3 border-t border-border/60 flex items-center justify-between gap-2 text-[11px] font-mono text-muted-foreground">
-                    <div className="flex items-center gap-3">
-                      {hasChecklist && (
-                        <span
-                          className={`flex items-center gap-1 ${
-                            checklistDone ? "text-emerald-700 font-bold" : ""
-                          }`}
-                        >
-                          <CheckSquare className="size-3" />
-                          <span>
-                            {content.checklistStats.done}/{content.checklistStats.total}
-                          </span>
-                        </span>
-                      )}
-
-                      {content.refsCount > 0 && (
-                        <span className="flex items-center gap-1">
-                          <LinkIcon className="size-3" />
-                          <span>{content.refsCount} ref{content.refsCount > 1 ? "s" : ""}</span>
-                        </span>
-                      )}
-
-                      {content.postsCount > 0 && (
-                        <span className="flex items-center gap-1 text-foreground font-semibold">
-                          <Send className="size-3" />
-                          <span>{content.postsCount} post{content.postsCount > 1 ? "s" : ""}</span>
-                        </span>
-                      )}
-                    </div>
-
-                    {content.plannedFor && (
-                      <span className="flex items-center gap-1 text-muted-foreground/80">
-                        <Calendar className="size-3" />
-                        <span>{content.plannedFor}</span>
-                      </span>
-                    )}
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
+        <div className="space-y-6">
+          <ContentsViewClient
+            items={items}
+            todayIso={todayIso}
+            isArchivedView={archived}
+            activeStatusFilter={params.status || "all"}
+          />
 
           {totalPages > 1 && (
-            <div className="pt-4 border-t border-border/60 flex items-center justify-between gap-4 text-xs font-mono">
-              <span className="text-muted-foreground">
-                Showing {offset + 1}–{Math.min(offset + items.length, total)} of {total}
+            <div className="pt-4 border-t border-border/80 flex flex-wrap items-center justify-between gap-4 text-xs font-mono">
+              <span className="text-muted-foreground tabular-nums">
+                Showing {offset + 1}–{Math.min(offset + items.length, total)} of {total} contents
+                <span className="text-muted-foreground/70">
+                  {" "}
+                  (Page {safePage} of {totalPages})
+                </span>
               </span>
-              <div className="flex items-center gap-2">
-                {currentPage > 1 ? (
-                  <Link href={buildPageHref(currentPage - 1)}>
-                    <Button variant="outline" size="sm" className="h-8 px-2.5 text-xs font-mono gap-1">
+
+              <div className="flex items-center gap-1 flex-wrap">
+                {safePage > 1 ? (
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2.5 text-xs font-mono rounded-md gap-1"
+                  >
+                    <Link href={buildPageHref(safePage - 1)}>
                       <ChevronLeft className="size-3.5" />
                       <span>Prev</span>
-                    </Button>
-                  </Link>
+                    </Link>
+                  </Button>
                 ) : (
-                  <Button variant="outline" size="sm" disabled className="h-8 px-2.5 text-xs font-mono gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled
+                    className="h-8 px-2.5 text-xs font-mono rounded-md gap-1"
+                  >
                     <ChevronLeft className="size-3.5" />
                     <span>Prev</span>
                   </Button>
                 )}
 
-                <span className="px-2 font-bold text-foreground">
-                  Page {currentPage} / {totalPages}
-                </span>
+                {pageNumbers.map((entry, idx) =>
+                  entry === "ellipsis" ? (
+                    <span
+                      key={`ellipsis-${idx}`}
+                      className="px-2 text-xs font-mono text-muted-foreground select-none"
+                    >
+                      …
+                    </span>
+                  ) : entry === safePage ? (
+                    <span
+                      key={entry}
+                      aria-current="page"
+                      className="h-8 min-w-8 px-2 inline-flex items-center justify-center rounded-md bg-foreground text-background text-xs font-mono font-bold tabular-nums"
+                    >
+                      {entry}
+                    </span>
+                  ) : (
+                    <Button
+                      key={entry}
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="h-8 min-w-8 px-2 text-xs font-mono rounded-md tabular-nums"
+                    >
+                      <Link href={buildPageHref(entry)}>{entry}</Link>
+                    </Button>
+                  )
+                )}
 
-                {currentPage < totalPages ? (
-                  <Link href={buildPageHref(currentPage + 1)}>
-                    <Button variant="outline" size="sm" className="h-8 px-2.5 text-xs font-mono gap-1">
+                {safePage < totalPages ? (
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2.5 text-xs font-mono rounded-md gap-1"
+                  >
+                    <Link href={buildPageHref(safePage + 1)}>
                       <span>Next</span>
                       <ChevronRight className="size-3.5" />
-                    </Button>
-                  </Link>
+                    </Link>
+                  </Button>
                 ) : (
-                  <Button variant="outline" size="sm" disabled className="h-8 px-2.5 text-xs font-mono gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled
+                    className="h-8 px-2.5 text-xs font-mono rounded-md gap-1"
+                  >
                     <span>Next</span>
                     <ChevronRight className="size-3.5" />
                   </Button>
@@ -273,7 +330,7 @@ export default async function ContentsPage({ searchParams }: ContentsPageProps) 
               </div>
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );

@@ -38,7 +38,7 @@ export function extractUrls(text: string): string[] {
   let match: RegExpExecArray | null;
 
   while ((match = urlRegex.exec(decoded)) !== null) {
-    let clean = match[0].replace(/[.,;)]+$/, "");
+    const clean = match[0].replace(/[.,;)]+$/, "");
     if (clean) {
       matches.push(clean);
     }
@@ -97,7 +97,7 @@ export async function normalizeUrl(
     throw new AppError("invalid_url", "Input URL cannot be empty");
   }
 
-  let text = input.trim().replace(/\\\//g, "/").replace(/&amp;/g, "&");
+  const text = input.trim().replace(/\\\//g, "/").replace(/&amp;/g, "&");
 
   // Extract URL from text or handle bare host.tld/path
   let rawUrl = "";
@@ -371,7 +371,7 @@ export async function normalizeUrl(
   });
 
   const queryString = cleanParams.toString() ? `?${cleanParams.toString()}` : "";
-  let cleanPath = path.replace(/\/+$/, "");
+  const cleanPath = path.replace(/\/+$/, "");
 
   return {
     url: `https://${host}${cleanPath}${queryString}`,

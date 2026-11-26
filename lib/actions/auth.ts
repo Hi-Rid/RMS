@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createServerClient } from "@/lib/supabase/server";
 import { env } from "@/lib/env";
@@ -32,6 +33,27 @@ function hasSupabaseConfig(): boolean {
   return Boolean(
     env.NEXT_PUBLIC_SUPABASE_URL && env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
   );
+}
+
+async function resolveAppOrigin(): Promise<string> {
+  const configured = env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
+  if (configured && !configured.includes("localhost")) {
+    return configured;
+  }
+
+  try {
+    const h = await headers();
+    const host = h.get("x-forwarded-host") || h.get("host");
+    if (host) {
+      const proto =
+        h.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
+      return `${proto}://${host}`.replace(/\/+$/, "");
+    }
+  } catch {
+    // Fallback below if headers() is unavailable
+  }
+
+  return configured || "http://localhost:3000";
 }
 
 export async function signInWithPassword(input: {
@@ -67,7 +89,11 @@ export async function signInWithPassword(input: {
     if (error || !data.user || !data.user.email) {
       const msg = error?.message?.toLowerCase() || "";
       if (msg.includes("email not confirmed")) {
-        return fail("unauthorized", "Please verify your email address before signing in.");
+        return fail(
+          "unauthorized",
+          "Your email address has not been verified yet.",
+          { reason: "email_unconfirmed" }
+        );
       }
       return fail("unauthorized", "Invalid email or password.");
     }
@@ -109,7 +135,7 @@ export async function registerWithPassword(input: {
     );
   }
 
-  const appUrl = (env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/+$/, "");
+  const appUrl = await resolveAppOrigin();
 
   try {
     const supabase = await createServerClient();
@@ -147,12 +173,51 @@ export async function registerWithPassword(input: {
   }
 }
 
+export async function resendVerificationEmail(input: {
+  email: string;
+}): Promise<ActionResult<{ message: string }>> {
+  const parsed = requestSchema.safeParse({ email: input.email.trim() });
+  if (!parsed.success) {
+    return fail("validation", "Please enter a valid email address.");
+  }
+
+  if (!hasSupabaseConfig()) {
+    return fail(
+      "blocked",
+      "Supabase Auth is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY to .env.local."
+    );
+  }
+
+  const email = parsed.data.email.trim().toLowerCase();
+  const ownerEmail = env.OWNER_EMAIL?.trim().toLowerCase();
+  const message =
+    "If this account awaits verification, a fresh confirmation link has been sent.";
+
+  if (!ownerEmail || email === ownerEmail) {
+    try {
+      const appUrl = await resolveAppOrigin();
+      const supabase = await createServerClient();
+      await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: {
+          emailRedirectTo: `${appUrl}/auth/confirm`,
+        },
+      });
+    } catch (err) {
+      console.error("resendVerificationEmail error:", err);
+    }
+  }
+
+  return ok({ message });
+}
+
 export async function requestLoginCode(input: {
   email: string;
 }): Promise<ActionResult<{ message: string }>> {
-  const parsed = requestSchema.safeParse(input);
+  const parsed = requestSchema.safeParse({ email: input.email.trim() });
   if (!parsed.success) {
-    return fail("validation", "Please enter a valid email address");
+    return fail("validation", "Please enter a valid email address.");
   }
 
   if (!hasSupabaseConfig()) {

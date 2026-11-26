@@ -43,20 +43,92 @@ export interface ContentListItem {
   checklistStats: { total: number; done: number };
 }
 
+export type ContentSortOption =
+  | "recent"
+  | "updated"
+  | "planned"
+  | "oldest"
+  | "title"
+  | "rating";
+
+export interface ContentCounts {
+  all: number;
+  production: number;
+  posted: number;
+  evaluating: number;
+  archived: number;
+  scheduled: number;
+}
+
 export interface ListContentsParams {
   userId?: string;
   status?: string;
   pillarSlug?: string;
   formatSlug?: string;
   seriesId?: string;
+  hookTypeSlug?: string;
+  plannedFilter?: "all" | "scheduled" | "unscheduled";
   searchText?: string;
   archived?: boolean;
+  sort?: ContentSortOption;
   limit?: number;
   offset?: number;
 }
 
 /**
- * Lists contents scoped to userId with filters, relations, and counts.
+ * Returns status and scope counts for contents owned by the active user.
+ */
+export async function getContentCounts(explicitUserId?: string): Promise<ContentCounts> {
+  try {
+    const userId = explicitUserId ?? (await getOwner())?.id;
+    if (!userId) {
+      return {
+        all: 0,
+        production: 0,
+        posted: 0,
+        evaluating: 0,
+        archived: 0,
+        scheduled: 0,
+      };
+    }
+
+    const [row] = await db
+      .select({
+        all: sql<number>`coalesce(sum(case when ${contents.archivedAt} is null then 1 else 0 end), 0)::int`,
+        production: sql<number>`coalesce(sum(case when ${contents.archivedAt} is null and ${contents.status} = 'production' then 1 else 0 end), 0)::int`,
+        posted: sql<number>`coalesce(sum(case when ${contents.archivedAt} is null and ${contents.status} = 'posted' then 1 else 0 end), 0)::int`,
+        evaluating: sql<number>`coalesce(sum(case when ${contents.archivedAt} is null and ${contents.status} = 'evaluating' then 1 else 0 end), 0)::int`,
+        archived: sql<number>`coalesce(sum(case when ${contents.archivedAt} is not null then 1 else 0 end), 0)::int`,
+        scheduled: sql<number>`coalesce(sum(case when ${contents.archivedAt} is null and ${contents.plannedFor} is not null then 1 else 0 end), 0)::int`,
+      })
+      .from(contents)
+      .where(eq(contents.userId, userId));
+
+    return (
+      row || {
+        all: 0,
+        production: 0,
+        posted: 0,
+        evaluating: 0,
+        archived: 0,
+        scheduled: 0,
+      }
+    );
+  } catch (error) {
+    console.warn("Failed to load content counts:", error);
+    return {
+      all: 0,
+      production: 0,
+      posted: 0,
+      evaluating: 0,
+      archived: 0,
+      scheduled: 0,
+    };
+  }
+}
+
+/**
+ * Lists contents scoped to userId with filters, sorting, relations, and counts.
  */
 export async function listContents(params: ListContentsParams = {}): Promise<{
   items: ContentListItem[];
@@ -68,8 +140,11 @@ export async function listContents(params: ListContentsParams = {}): Promise<{
       pillarSlug,
       formatSlug,
       seriesId,
+      hookTypeSlug,
+      plannedFilter = "all",
       searchText,
       archived = false,
+      sort = "recent",
       limit = 30,
       offset = 0,
     } = params;
@@ -86,7 +161,14 @@ export async function listContents(params: ListContentsParams = {}): Promise<{
     }
 
     if (status && status !== "all") {
-      conditions.push(eq(contents.status, status as any));
+      const validStatuses = ["production", "posted", "evaluating"] as const;
+      if ((validStatuses as readonly string[]).includes(status)) {
+        conditions.push(
+          eq(contents.status, status as (typeof validStatuses)[number])
+        );
+      } else {
+        return { items: [], total: 0 };
+      }
     }
 
     if (formatSlug && formatSlug !== "all") {
@@ -97,14 +179,28 @@ export async function listContents(params: ListContentsParams = {}): Promise<{
       conditions.push(eq(contents.seriesId, seriesId));
     }
 
+    if (hookTypeSlug && hookTypeSlug !== "all") {
+      conditions.push(eq(hookTypes.slug, hookTypeSlug));
+    }
+
+    if (plannedFilter === "scheduled") {
+      conditions.push(sql`${contents.plannedFor} IS NOT NULL`);
+    } else if (plannedFilter === "unscheduled") {
+      conditions.push(isNull(contents.plannedFor));
+    }
+
     if (searchText && searchText.trim()) {
       const term = `%${searchText.trim().toLowerCase()}%`;
       conditions.push(
         or(
           sql`lower(${contents.title}) LIKE ${term}`,
           sql`lower(${contents.hookText}) LIKE ${term}`,
+          sql`lower(${contents.changesNote}) LIKE ${term}`,
           sql`lower(${contents.notes}) LIKE ${term}`,
-          sql`${contents.searchText} LIKE ${term}`
+          sql`lower(${contents.searchText}) LIKE ${term}`,
+          sql`lower(${series.name}) LIKE ${term}`,
+          sql`lower(${audios.title}) LIKE ${term}`,
+          sql`lower(${hookTypes.name}) LIKE ${term}`
         )!
       );
     }
@@ -125,9 +221,25 @@ export async function listContents(params: ListContentsParams = {}): Promise<{
       .select({ count: sql<number>`count(*)::int` })
       .from(contents)
       .leftJoin(formats, eq(contents.formatId, formats.id))
+      .leftJoin(series, eq(contents.seriesId, series.id))
+      .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
+      .leftJoin(audios, eq(contents.audioId, audios.id))
       .where(whereClause);
 
     const total = totalRes?.count || 0;
+
+    const orderByClauses =
+      sort === "updated"
+        ? [desc(contents.updatedAt), desc(contents.createdAt)]
+        : sort === "planned"
+          ? [sql`${contents.plannedFor} ASC NULLS LAST`, desc(contents.createdAt)]
+          : sort === "oldest"
+            ? [asc(contents.createdAt)]
+            : sort === "title"
+              ? [asc(sql`lower(btrim(${contents.title}))`), desc(contents.createdAt)]
+              : sort === "rating"
+                ? [sql`${contents.finalRating} DESC NULLS LAST`, desc(contents.createdAt)]
+                : [desc(contents.createdAt)];
 
     const rows = await db
       .select({
@@ -158,7 +270,7 @@ export async function listContents(params: ListContentsParams = {}): Promise<{
       .leftJoin(hookTypes, eq(contents.hookTypeId, hookTypes.id))
       .leftJoin(audios, eq(contents.audioId, audios.id))
       .where(whereClause)
-      .orderBy(desc(contents.createdAt))
+      .orderBy(...orderByClauses)
       .limit(limit)
       .offset(offset);
 

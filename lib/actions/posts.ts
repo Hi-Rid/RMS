@@ -2,8 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, eq, sql } from "drizzle-orm";
-import { db, withTx } from "@/lib/db";
+import { and, eq } from "drizzle-orm";
+import { withTx } from "@/lib/db";
 import { posts, snapshots, contents, formats } from "@/db/schema";
 import { ok, fail, type ActionResult } from "@/lib/actions/result";
 import { requireActionOwner } from "@/lib/auth/owner";

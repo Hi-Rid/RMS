@@ -21,7 +21,7 @@ function Command({
     <CommandPrimitive
       data-slot="command"
       className={cn(
-        "flex size-full flex-col overflow-hidden rounded-2xl bg-card text-foreground",
+        "flex size-full flex-col overflow-hidden rounded-lg bg-card text-foreground",
         className
       )}
       {...props}
@@ -46,7 +46,7 @@ function CommandDialog({
     <Dialog {...props}>
       <DialogContent
         className={cn(
-          "top-[18vh] translate-y-0 overflow-hidden rounded-2xl border border-border/90 bg-card p-0 ring-0 sm:max-w-lg",
+          "top-[8vh] sm:top-[16vh] translate-y-0 overflow-hidden rounded-lg border border-border/90 bg-card p-0 ring-0 sm:max-w-lg max-h-[82dvh]",
           className
         )}
         showCloseButton={showCloseButton}
@@ -94,7 +94,7 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        "no-scrollbar max-h-[340px] scroll-py-1.5 overflow-x-hidden overflow-y-auto p-2 outline-none",
+        "no-scrollbar max-h-[48dvh] sm:max-h-[340px] scroll-py-1.5 overflow-x-hidden overflow-y-auto p-2 outline-none",
         className
       )}
       {...props}
@@ -153,7 +153,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "group/command-item relative flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-[13px] font-medium text-foreground/85 outline-hidden select-none transition-colors data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-[#800115]/[0.07] data-[selected=true]:text-[#800115] data-[selected=true]:font-semibold [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg]:text-muted-foreground data-[selected=true]:[&_svg]:text-[#800115]",
+        "group/command-item relative flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-[13px] font-medium text-foreground/85 outline-hidden select-none transition-colors data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-brand/[0.07] data-[selected=true]:text-brand data-[selected=true]:font-semibold [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg]:text-muted-foreground data-[selected=true]:[&_svg]:text-brand",
         className
       )}
       {...props}
@@ -172,7 +172,7 @@ function CommandShortcut({
     <kbd
       data-slot="command-shortcut"
       className={cn(
-        "ml-auto inline-flex min-w-5 items-center justify-center rounded-md border border-border/80 bg-secondary/80 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground group-data-[selected=true]/command-item:border-[#800115]/20 group-data-[selected=true]/command-item:bg-[#800115]/10 group-data-[selected=true]/command-item:text-[#800115]",
+        "ml-auto inline-flex min-w-5 items-center justify-center rounded-md border border-border/80 bg-secondary/80 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground group-data-[selected=true]/command-item:border-brand/20 group-data-[selected=true]/command-item:bg-brand/10 group-data-[selected=true]/command-item:text-brand",
         className
       )}
       {...props}

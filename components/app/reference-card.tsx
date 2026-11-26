@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/app/status-badge";
 import { CaptureSheet } from "@/components/app/capture-sheet";
 import { ReferencePreview } from "@/components/app/reference-preview";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   ExternalLink,
   Edit3,
@@ -19,26 +20,36 @@ import {
   Plus,
   AlertCircle,
   RotateCcw,
+  Archive,
+  Layers,
 } from "lucide-react";
 import {
   setReferenceStatus,
   skipReference,
   unskipReference,
+  archiveReference,
   restoreReference,
 } from "@/lib/actions/references";
 import { toast } from "sonner";
 import type { ReferenceListItem, MasterData } from "@/lib/queries/references";
+import { cn } from "@/lib/utils";
 
 interface ReferenceCardProps {
   reference: ReferenceListItem;
   masterData?: MasterData;
   showTriageActions?: boolean;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }
 
 export function ReferenceCard({
   reference,
   masterData,
   showTriageActions = true,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
 }: ReferenceCardProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -49,7 +60,20 @@ export function ReferenceCard({
     startTransition(async () => {
       const res = await setReferenceStatus({ id: reference.id, status: "selected" });
       if (res.ok) {
-        toast.success("Reference selected");
+        toast.success("Reference selected", {
+          action: {
+            label: "Undo",
+            onClick: async () => {
+              const undoRes = await setReferenceStatus({ id: reference.id, status: "inbox" });
+              if (undoRes.ok) {
+                toast.info("Moved back to Inbox");
+                router.refresh();
+              } else {
+                toast.error(undoRes.error.message);
+              }
+            },
+          },
+        });
         router.refresh();
       } else {
         toast.error(res.error.message);
@@ -62,7 +86,20 @@ export function ReferenceCard({
     startTransition(async () => {
       const res = await skipReference({ id: reference.id });
       if (res.ok) {
-        toast.success("Reference skipped");
+        toast.success("Reference skipped", {
+          action: {
+            label: "Undo",
+            onClick: async () => {
+              const undoRes = await unskipReference({ id: reference.id, to: "inbox" });
+              if (undoRes.ok) {
+                toast.info("Restored to Inbox");
+                router.refresh();
+              } else {
+                toast.error(undoRes.error.message);
+              }
+            },
+          },
+        });
         router.refresh();
       } else {
         toast.error(res.error.message);
@@ -76,6 +113,27 @@ export function ReferenceCard({
       const res = await unskipReference({ id: reference.id, to: "inbox" });
       if (res.ok) {
         toast.success("Reference moved to inbox");
+        router.refresh();
+      } else {
+        toast.error(res.error.message);
+      }
+    });
+  };
+
+  const handleArchive = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    startTransition(async () => {
+      const res = await archiveReference({ id: reference.id });
+      if (res.ok) {
+        toast.success("Reference archived", {
+          action: {
+            label: "Undo",
+            onClick: async () => {
+              await restoreReference({ id: reference.id });
+              router.refresh();
+            },
+          },
+        });
         router.refresh();
       } else {
         toast.error(res.error.message);
@@ -103,7 +161,6 @@ export function ReferenceCard({
   const isUnused = !reference.contentId && reference.status !== "skipped";
   const needsDetails = reference.pillars.length === 0;
 
-  // PRD §12.0: Label mono PILLAR · FORMAT (first pillar + +N)
   const pillarText =
     reference.pillars.length > 0
       ? `${reference.pillars[0].name.toUpperCase()}${
@@ -113,7 +170,6 @@ export function ReferenceCard({
   const formatText = reference.format ? reference.format.name.toUpperCase() : null;
   const headerMonoLabel = [pillarText, formatText].filter(Boolean).join(" · ");
 
-  // PRD §12.0: Title = first sentence of summary; fallback to hookText or Untitled · <host>/<path>
   const fallbackTitle = (() => {
     if (reference.summary) {
       const firstSentence = reference.summary.split(/[.!?]\s+/)[0];
@@ -128,14 +184,36 @@ export function ReferenceCard({
     }
   })();
 
+  const detailHref = `/references/${reference.id}`;
+
   return (
     <>
-      <div
-        onClick={() => router.push(`/references/${reference.id}`)}
-        className="group/card bg-card border border-border rounded-lg overflow-hidden transition-all hover:border-foreground/40 cursor-pointer flex flex-col justify-between"
+      <article
+        className={cn(
+          "group/card relative bg-card border rounded-lg overflow-hidden transition-colors flex flex-col justify-between",
+          selected
+            ? "border-brand ring-1 ring-brand/40"
+            : "border-border hover:border-foreground/40"
+        )}
       >
+        {/* Multi-select checkbox overlay */}
+        {selectable && (
+          <div className="absolute top-2 right-2 z-40">
+            <label
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-center justify-center size-7 rounded-md bg-card/95 border border-border cursor-pointer hover:border-foreground/50"
+            >
+              <Checkbox
+                checked={selected}
+                onCheckedChange={() => onToggleSelect?.(reference.id)}
+                aria-label={`Select ${fallbackTitle}`}
+              />
+            </label>
+          </div>
+        )}
+
         <div className="space-y-2.5">
-          {/* Preview (compact 4:5 frame housing 9:16 media + blurred sidebars) */}
+          {/* Preview (clickable area navigates to detail cleanly; action buttons sit as siblings to avoid nested links) */}
           <ReferencePreview
             url={reference.url}
             platform={reference.platform.slug}
@@ -144,60 +222,76 @@ export function ReferenceCard({
             hookText={reference.hookText}
             summary={reference.summary}
             handle={reference.sourceAccount?.handle}
+            detailHref={detailHref}
+            detailAriaLabel={`Open details for ${fallbackTitle}`}
+            showExternalButton={!selectable}
             className="aspect-[4/5] rounded-none border-0 border-b"
           />
 
           <div className="px-3 pb-2 space-y-2">
-            {/* Top Row: PILLAR · FORMAT mono label & Status Badge */}
+            {/* Top Row: PILLAR · FORMAT or Needs details + Status */}
             <div className="flex items-center justify-between gap-1.5 flex-wrap">
-              <div className="flex items-center gap-1 flex-wrap">
-                {headerMonoLabel ? (
-                  <span className="text-[10px] font-mono uppercase font-bold tracking-wider text-muted-foreground">
+              <div className="flex items-center gap-1 flex-wrap min-w-0">
+                {headerMonoLabel && (
+                  <span className="text-[10px] font-mono uppercase font-bold tracking-wider text-muted-foreground truncate">
                     {headerMonoLabel}
                   </span>
-                ) : (
-                  <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 border border-amber-500/30 flex items-center gap-1">
-                    <AlertCircle className="size-3" />
+                )}
+                {needsDetails && (
+                  <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-warning/10 text-warning border border-warning/30 inline-flex items-center gap-1">
+                    <AlertCircle className="size-3 shrink-0" />
                     <span>Needs details</span>
                   </span>
                 )}
               </div>
 
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <StatusBadge status={reference.status} size="sm" />
                 <a
                   href={reference.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  title="Open original URL"
-                  onClick={(e) => e.stopPropagation()}
-                  className="text-muted-foreground hover:text-foreground transition-colors p-0.5"
+                  title="Open original post"
+                  aria-label="Open original post in new tab"
+                  className="size-7 rounded-md inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors"
                 >
-                  <ExternalLink className="size-3" />
+                  <ExternalLink className="size-3.5" />
                 </a>
               </div>
             </div>
 
             {/* Title / Hook Preview */}
-            <h3 className="text-xs font-mono font-semibold text-foreground line-clamp-2 leading-snug group-hover/card:underline underline-offset-2">
-              {fallbackTitle}
+            <h3 className="text-xs font-mono font-semibold text-foreground leading-snug">
+              <Link
+                href={detailHref}
+                className="line-clamp-2 hover:underline underline-offset-2 focus-visible:outline-none focus-visible:underline"
+              >
+                {fallbackTitle}
+              </Link>
             </h3>
 
             {/* Description Row: @handle · Audio */}
             {(reference.sourceAccount || reference.audio) && (
               <div className="flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground flex-wrap">
                 {reference.sourceAccount && (
-                  <span className="flex items-center gap-1 text-foreground/80 font-medium truncate max-w-[120px]">
+                  <Link
+                    href={`/sources/${reference.sourceAccount.id}`}
+                    className="flex items-center gap-1 text-foreground/80 hover:text-foreground font-medium truncate max-w-[130px] hover:underline"
+                  >
                     <User className="size-3 text-muted-foreground/70 shrink-0" />
                     <span className="truncate">@{reference.sourceAccount.handle}</span>
-                  </span>
+                  </Link>
                 )}
                 {reference.sourceAccount && reference.audio && <span>&middot;</span>}
                 {reference.audio && (
-                  <span className="flex items-center gap-1 truncate max-w-[130px]" title={reference.audio.title}>
+                  <Link
+                    href={`/audio/${reference.audio.id}`}
+                    title={reference.audio.title}
+                    className="flex items-center gap-1 truncate max-w-[135px] hover:text-foreground hover:underline"
+                  >
                     <Music className="size-3 text-muted-foreground/70 shrink-0" />
                     <span className="truncate">{reference.audio.title}</span>
-                  </span>
+                  </Link>
                 )}
               </div>
             )}
@@ -205,19 +299,14 @@ export function ReferenceCard({
             {/* Chips Row: Unused, Pillars & Tags */}
             <div className="flex items-center gap-1 flex-wrap pt-0.5">
               {isUnused && (
-                <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary text-primary-foreground font-bold">
+                <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-primary text-primary-foreground font-bold">
                   Unused
-                </span>
-              )}
-              {needsDetails && !headerMonoLabel && (
-                <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
-                  No Pillars
                 </span>
               )}
               {reference.pillars.slice(0, 2).map((pillar) => (
                 <span
                   key={pillar.id}
-                  className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-secondary text-foreground border border-border/80 font-medium"
+                  className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-secondary text-foreground border border-border/80 font-medium"
                 >
                   {pillar.name}
                 </span>
@@ -232,42 +321,42 @@ export function ReferenceCard({
         </div>
 
         {/* Action Bar at the Bottom */}
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="px-3 py-2 border-t border-border/60 flex items-center justify-between gap-1 flex-wrap"
-        >
+        <div className="px-3 py-2 border-t border-border/60 flex items-center justify-between gap-1 flex-wrap bg-card">
           <div className="flex items-center gap-1">
             <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={() => setIsCaptureOpen(true)}
-              className="h-7 px-2 text-[11px] font-mono gap-1"
+              className="h-8 px-2 text-[11px] font-mono rounded-md gap-1"
             >
               <Edit3 className="size-3" />
               <span>Capture</span>
             </Button>
 
-            <Link href={`/references/${reference.id}`}>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-1.5 text-[11px] font-mono text-muted-foreground hover:text-foreground"
-              >
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              className="h-8 px-1.5 text-[11px] font-mono rounded-md text-muted-foreground hover:text-foreground"
+            >
+              <Link href={detailHref}>
                 <span>Detail</span>
                 <ArrowRight className="size-3 ml-0.5" />
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
 
           {showTriageActions && (
             <div className="flex items-center gap-1">
               {isArchived ? (
                 <Button
+                  type="button"
                   variant="outline"
                   size="sm"
                   disabled={isPending}
                   onClick={handleRestore}
-                  className="h-7 px-2 text-[11px] font-mono gap-1"
+                  className="h-8 px-2 text-[11px] font-mono rounded-md gap-1"
                 >
                   <RotateCcw className="size-3" />
                   <span>Restore</span>
@@ -277,20 +366,24 @@ export function ReferenceCard({
                   {isInbox && (
                     <>
                       <Button
+                        type="button"
                         variant="outline"
                         size="sm"
                         disabled={isPending}
                         onClick={handleSkip}
-                        className="h-7 px-2 text-[11px] font-mono text-muted-foreground hover:text-foreground"
+                        title="Skip reference"
+                        className="h-8 px-2 text-[11px] font-mono rounded-md text-muted-foreground hover:text-foreground"
                       >
                         <XCircle className="size-3 mr-1" />
                         <span>Skip</span>
                       </Button>
                       <Button
+                        type="button"
                         size="sm"
                         disabled={isPending}
                         onClick={handleSelect}
-                        className="h-7 px-2 text-[11px] font-mono bg-foreground text-background hover:bg-foreground/90 font-bold"
+                        title="Select reference"
+                        className="h-8 px-2 text-[11px] font-mono rounded-md bg-foreground text-background hover:bg-foreground/90 font-bold"
                       >
                         <CheckCircle2 className="size-3 mr-1" />
                         <span>Select</span>
@@ -299,26 +392,71 @@ export function ReferenceCard({
                   )}
 
                   {isSelected && (
-                    <Link href={`/contents/new?refId=${reference.id}`} title="Create Content">
+                    <>
                       <Button
+                        type="button"
+                        variant="ghost"
                         size="sm"
-                        className="h-7 px-2 text-[11px] font-mono bg-foreground text-background hover:bg-foreground/90 font-bold"
+                        disabled={isPending}
+                        onClick={handleArchive}
+                        title="Archive reference"
+                        aria-label="Archive reference"
+                        className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground rounded-md"
                       >
-                        <Plus className="size-3 mr-1" />
-                        <span>Create</span>
+                        <Archive className="size-3.5" />
                       </Button>
-                    </Link>
+                      <Button
+                        asChild
+                        size="sm"
+                        title="Create Content"
+                        className="h-8 px-2 text-[11px] font-mono rounded-md bg-foreground text-background hover:bg-foreground/90 font-bold"
+                      >
+                        <Link href={`/contents/new?refId=${reference.id}`}>
+                          <Plus className="size-3 mr-1" />
+                          <span>Create</span>
+                        </Link>
+                      </Button>
+                    </>
                   )}
 
                   {isSkipped && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={isPending}
+                        onClick={handleArchive}
+                        title="Archive reference"
+                        aria-label="Archive reference"
+                        className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground rounded-md"
+                      >
+                        <Archive className="size-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isPending}
+                        onClick={handleUnskip}
+                        className="h-8 px-2 text-[11px] font-mono rounded-md"
+                      >
+                        <span>Unskip</span>
+                      </Button>
+                    </>
+                  )}
+
+                  {reference.contentId && (
                     <Button
+                      asChild
                       variant="outline"
                       size="sm"
-                      disabled={isPending}
-                      onClick={handleUnskip}
-                      className="h-7 px-2 text-[11px] font-mono"
+                      className="h-8 px-2 text-[11px] font-mono rounded-md gap-1"
                     >
-                      <span>Unskip</span>
+                      <Link href={`/contents/${reference.contentId}`}>
+                        <Layers className="size-3" />
+                        <span>Studio</span>
+                      </Link>
                     </Button>
                   )}
                 </>
@@ -326,7 +464,7 @@ export function ReferenceCard({
             </div>
           )}
         </div>
-      </div>
+      </article>
 
       <CaptureSheet
         reference={reference}

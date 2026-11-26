@@ -1,5 +1,5 @@
 import "server-only";
-import { eq, and, sql, or, isNull, desc, inArray } from "drizzle-orm";
+import { eq, and, sql, or, isNull, desc, asc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { getOwner } from "@/lib/auth/owner";
 import {
@@ -337,15 +337,20 @@ export interface ReferenceListItem {
   coverUrl?: string | null;
 }
 
+export type ReferenceSortOption = "recent" | "oldest" | "updated" | "title";
+
 export interface ListReferencesParams {
   userId?: string;
   status?: string;
   pillarSlug?: string;
   platformSlug?: string;
   formatSlug?: string;
+  hookTypeSlug?: string;
   unusedOnly?: boolean;
+  missingOnly?: boolean;
   searchText?: string;
   archived?: boolean;
+  sort?: ReferenceSortOption;
   limit?: number;
   offset?: number;
 }
@@ -363,9 +368,12 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
       pillarSlug,
       platformSlug,
       formatSlug,
+      hookTypeSlug,
       unusedOnly,
+      missingOnly,
       searchText,
       archived = false,
+      sort = "recent",
       limit = 36,
       offset = 0,
     } = params;
@@ -382,7 +390,21 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
     }
 
     if (status && status !== "all") {
-      conditions.push(eq(refs.status, status as any));
+      const validStatuses = [
+        "inbox",
+        "selected",
+        "production",
+        "posted",
+        "evaluating",
+        "skipped",
+      ] as const;
+      if ((validStatuses as readonly string[]).includes(status)) {
+        conditions.push(
+          eq(refs.status, status as (typeof validStatuses)[number])
+        );
+      } else {
+        return { items: [], total: 0 };
+      }
     }
 
     if (unusedOnly) {
@@ -393,13 +415,18 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
     if (searchText && searchText.trim()) {
       const trimmed = searchText.trim();
       const term = `%${trimmed.toLowerCase()}%`;
+      const handleTerm = `%${trimmed.replace(/^@+/, "").toLowerCase()}%`;
       const semanticIds = await findSemanticReferenceIds(userId, trimmed);
       const textCondition = or(
         sql`lower(${refs.url}) LIKE ${term}`,
         sql`lower(${refs.hookText}) LIKE ${term}`,
         sql`lower(${refs.summary}) LIKE ${term}`,
+        sql`lower(${refs.visualNotes}) LIKE ${term}`,
         sql`lower(${refs.notes}) LIKE ${term}`,
-        sql`${refs.searchText} LIKE ${term}`
+        sql`lower(${refs.searchText}) LIKE ${term}`,
+        sql`lower(${sourceAccounts.handle}) LIKE ${handleTerm}`,
+        sql`lower(${audios.title}) LIKE ${term}`,
+        sql`lower(${audios.artist}) LIKE ${term}`
       )!;
       if (semanticIds.length > 0) {
         conditions.push(or(textCondition, inArray(refs.id, semanticIds))!);
@@ -414,6 +441,23 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
 
     if (formatSlug && formatSlug !== "all") {
       conditions.push(eq(formats.slug, formatSlug));
+    }
+
+    if (hookTypeSlug && hookTypeSlug !== "all") {
+      conditions.push(eq(hookTypes.slug, hookTypeSlug));
+    }
+
+    if (missingOnly) {
+      conditions.push(
+        or(
+          sql`coalesce(btrim(${refs.hookText}), '') = ''`,
+          sql`coalesce(btrim(${refs.summary}), '') = ''`,
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${refPillars} rp
+            WHERE rp.ref_id = ${refs.id}
+          )`
+        )!
+      );
     }
 
     if (pillarSlug && pillarSlug !== "all") {
@@ -431,11 +475,28 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
     const [totalRes] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(refs)
-      .leftJoin(platforms, eq(refs.platformId, platforms.id))
+      .innerJoin(platforms, eq(refs.platformId, platforms.id))
       .leftJoin(formats, eq(refs.formatId, formats.id))
+      .leftJoin(hookTypes, eq(refs.hookTypeId, hookTypes.id))
+      .leftJoin(sourceAccounts, eq(refs.sourceAccountId, sourceAccounts.id))
+      .leftJoin(audios, eq(refs.audioId, audios.id))
       .where(whereClause);
 
     const total = totalRes?.count || 0;
+
+    const orderByClauses =
+      sort === "oldest"
+        ? [asc(refs.savedAt)]
+        : sort === "updated"
+          ? [desc(refs.updatedAt), desc(refs.savedAt)]
+          : sort === "title"
+            ? [
+                asc(
+                  sql`lower(coalesce(nullif(btrim(${refs.hookText}), ''), nullif(btrim(${refs.summary}), ''), ${refs.url}))`
+                ),
+                desc(refs.savedAt),
+              ]
+            : [desc(refs.savedAt)];
 
     const rows = await db
       .select({
@@ -472,7 +533,7 @@ export async function listReferences(params: ListReferencesParams = {}): Promise
       .leftJoin(sourceAccounts, eq(refs.sourceAccountId, sourceAccounts.id))
       .leftJoin(audios, eq(refs.audioId, audios.id))
       .where(whereClause)
-      .orderBy(desc(refs.savedAt))
+      .orderBy(...orderByClauses)
       .limit(limit)
       .offset(offset);
 

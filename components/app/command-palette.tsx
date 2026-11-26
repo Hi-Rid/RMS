@@ -35,32 +35,77 @@ interface CommandPaletteProps {
   onOpenAddLinks?: () => void;
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    el.isContentEditable ||
+    Boolean(el.closest('[contenteditable="true"]'))
+  );
+}
+
 export function CommandPalette({
   open,
   onOpenChange,
   onOpenAddLinks,
 }: CommandPaletteProps) {
   const router = useRouter();
+  const [isMac, setIsMac] = React.useState(false);
+
+  React.useEffect(() => {
+    setIsMac(typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform));
+  }, []);
+
+  const launchAddLinks = React.useCallback(() => {
+    if (onOpenAddLinks) {
+      window.setTimeout(onOpenAddLinks, 140);
+    } else {
+      router.push("/inbox");
+    }
+  }, [onOpenAddLinks, router]);
 
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      // Toggle on Cmd+K or Ctrl+K
-      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+      // Toggle on Cmd+K or Ctrl+K (CapsLock safe)
+      if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         onOpenChange(!open);
         return;
       }
 
-      // Open on "/" when not focused on an input/textarea
-      if (e.key === "/" && !["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)) {
+      if (open || e.metaKey || e.ctrlKey || e.altKey || isEditableTarget(e.target)) {
+        return;
+      }
+
+      // Skip global single-key shortcuts while any dialog/sheet is open
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) {
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+      if (key === "/") {
         e.preventDefault();
         onOpenChange(true);
+      } else if (key === "a" && !e.shiftKey) {
+        e.preventDefault();
+        if (onOpenAddLinks) onOpenAddLinks();
+        else router.push("/inbox");
+      } else if (key === "n" && !e.shiftKey) {
+        e.preventDefault();
+        router.push("/contents/new");
+      } else if (key === "t" && !e.shiftKey) {
+        e.preventDefault();
+        router.push("/inbox/triage");
       }
     };
 
     document.addEventListener("keydown", down);
     return () => document.removeEventListener("keydown", down);
-  }, [open, onOpenChange]);
+  }, [open, onOpenChange, onOpenAddLinks, router]);
 
   const runCommand = (command: () => void) => {
     onOpenChange(false);
@@ -69,29 +114,31 @@ export function CommandPalette({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput placeholder="Search commands or jump to a page..." />
+      <CommandInput placeholder="Jump to page or run action..." />
       <CommandList>
         <CommandEmpty>No matching commands or pages found.</CommandEmpty>
 
         <CommandGroup heading="Quick actions">
           <CommandItem
-            onSelect={() =>
-              runCommand(() => {
-                if (onOpenAddLinks) onOpenAddLinks();
-                else router.push("/inbox");
-              })
-            }
+            value="add links references paste url"
+            onSelect={() => runCommand(launchAddLinks)}
           >
             <PlusCircle />
             <span>Add links or references</span>
             <CommandShortcut>A</CommandShortcut>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/contents/new"))}>
+          <CommandItem
+            value="create new content studio"
+            onSelect={() => runCommand(() => router.push("/contents/new"))}
+          >
             <FilePlus />
             <span>Create new content</span>
             <CommandShortcut>N</CommandShortcut>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/inbox/triage"))}>
+          <CommandItem
+            value="start triage mode inbox review"
+            onSelect={() => runCommand(() => router.push("/inbox/triage"))}
+          >
             <ListTodo />
             <span>Start triage mode</span>
             <CommandShortcut>T</CommandShortcut>
@@ -101,47 +148,47 @@ export function CommandPalette({
         <CommandSeparator />
 
         <CommandGroup heading="Navigation">
-          <CommandItem onSelect={() => runCommand(() => router.push("/home"))}>
+          <CommandItem value="home dashboard" onSelect={() => runCommand(() => router.push("/home"))}>
             <Home />
             <span>Home</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/inbox"))}>
+          <CommandItem value="inbox queue" onSelect={() => runCommand(() => router.push("/inbox"))}>
             <Inbox />
             <span>Inbox</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/references"))}>
+          <CommandItem value="references library" onSelect={() => runCommand(() => router.push("/references"))}>
             <Bookmark />
             <span>References</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/contents"))}>
+          <CommandItem value="contents studio production" onSelect={() => runCommand(() => router.push("/contents"))}>
             <Layers />
-            <span>Contents</span>
+            <span>Contents Studio</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/evaluate"))}>
+          <CommandItem value="evaluate metrics checkpoints" onSelect={() => runCommand(() => router.push("/evaluate"))}>
             <CheckSquare />
             <span>Evaluate</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/planner"))}>
+          <CommandItem value="planner calendar schedule" onSelect={() => runCommand(() => router.push("/planner"))}>
             <Calendar />
             <span>Planner</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/audio"))}>
+          <CommandItem value="audio sound library" onSelect={() => runCommand(() => router.push("/audio"))}>
             <Music />
-            <span>Audio library</span>
+            <span>Audio</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/sources"))}>
+          <CommandItem value="sources creators accounts" onSelect={() => runCommand(() => router.push("/sources"))}>
             <Users />
-            <span>Source accounts</span>
+            <span>Sources</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/captions"))}>
+          <CommandItem value="captions hashtags templates" onSelect={() => runCommand(() => router.push("/captions"))}>
             <Quote />
-            <span>Caption library</span>
+            <span>Captions</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/insight"))}>
+          <CommandItem value="analytics insight reports" onSelect={() => runCommand(() => router.push("/insight"))}>
             <LineChart />
-            <span>Analytics</span>
+            <span>Analytics / Insight</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push("/settings"))}>
+          <CommandItem value="settings preferences api key" onSelect={() => runCommand(() => router.push("/settings"))}>
             <Settings />
             <span>Settings</span>
           </CommandItem>
@@ -159,7 +206,9 @@ export function CommandPalette({
             Open
           </span>
         </div>
-        <span className="font-mono text-[10px] text-muted-foreground/80">Ctrl+K or /</span>
+        <span className="font-mono text-[10px] text-muted-foreground/80">
+          {isMac ? "⌘K" : "Ctrl+K"} or /
+        </span>
       </div>
     </CommandDialog>
   );

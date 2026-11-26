@@ -242,7 +242,7 @@ export async function getInsightData(explicitUserId?: string): Promise<InsightDa
         .where(
           and(
             eq(audios.userId, userId),
-            sql`NOT EXISTS (SELECT 1 FROM ${contents} WHERE ${contents.audioId} = ${audios.id} AND ${contents.userId} = ${userId} AND ${contents.archivedAt} IS NULL)`
+            sql`NOT EXISTS (SELECT 1 FROM "contents" c WHERE c.audio_id = "audios"."id" AND c.user_id = ${userId} AND c.archived_at IS NULL)`
           )
         ),
 
@@ -284,7 +284,7 @@ export async function getInsightData(explicitUserId?: string): Promise<InsightDa
           and(
             eq(contents.userId, userId),
             isNull(contents.archivedAt),
-            sql`${contents.finalRating} IS NOT NULL`
+            sql`${contents.finalRating} >= 4`
           )
         )
         .orderBy(desc(contents.finalRating))
@@ -306,7 +306,7 @@ export async function getInsightData(explicitUserId?: string): Promise<InsightDa
           and(
             eq(contents.userId, userId),
             isNull(contents.archivedAt),
-            sql`${contents.finalRating} IS NOT NULL`
+            sql`${contents.finalRating} < 4`
           )
         )
         .orderBy(asc(contents.finalRating))

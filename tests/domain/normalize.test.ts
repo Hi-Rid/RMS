@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { normalizeTag, normalizeHandle, slugify, matchHookTypeId } from "@/lib/domain/normalize";
+import {
+  normalizeTag,
+  normalizeHandle,
+  slugify,
+  matchHookTypeId,
+  buildCreatorProfileUrl,
+} from "@/lib/domain/normalize";
 
 describe("lib/domain/normalize.ts (PRD §10.7 & §17.1)", () => {
   describe("normalizeTag", () => {
@@ -71,6 +77,23 @@ describe("lib/domain/normalize.ts (PRD §10.7 & §17.1)", () => {
     it("returns null when no hook matches or guess is empty", () => {
       expect(matchHookTypeId("", sampleHooks)).toBeNull();
       expect(matchHookTypeId("Unrecognized Format", sampleHooks)).toBeNull();
+    });
+  });
+
+  describe("buildCreatorProfileUrl", () => {
+    it("builds canonical creator profile URLs for supported platforms", () => {
+      expect(buildCreatorProfileUrl("instagram", "@Sueeeecy")).toBe(
+        "https://www.instagram.com/sueeeecy/"
+      );
+      expect(buildCreatorProfileUrl("tiktok", "mybettas")).toBe(
+        "https://www.tiktok.com/@mybettas"
+      );
+      expect(buildCreatorProfileUrl("x", "@user")).toBe("https://x.com/user");
+    });
+
+    it("returns null for unsupported platform or empty handle", () => {
+      expect(buildCreatorProfileUrl("other", "creator")).toBeNull();
+      expect(buildCreatorProfileUrl("instagram", "@@@")).toBeNull();
     });
   });
 });

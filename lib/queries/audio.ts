@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { getOwner } from "@/lib/auth/owner";
 import { audios, refs, contents, posts, platforms } from "@/db/schema";
 
+export type AudioSortOption = "recent" | "refs" | "contents" | "rating" | "newest" | "title";
+
 export interface AudioListItem {
   id: string;
   title: string;
@@ -12,6 +14,10 @@ export interface AudioListItem {
   notes: string | null;
   refsCount: number;
   contentsCount: number;
+  postsCount: number;
+  avgRating: number | null;
+  archivedUsageCount: number;
+  canDelete: boolean;
   lastUsedAt: string | null;
   isUnused: boolean;
   createdAt: string;
@@ -20,17 +26,23 @@ export interface AudioListItem {
 export interface ListAudiosParams {
   userId?: string;
   unusedOnly?: boolean;
+  originalOnly?: boolean;
   searchText?: string;
-  sortBy?: "title" | "recent" | "refs";
+  sortBy?: AudioSortOption;
 }
 
 export async function listAudios(params: ListAudiosParams = {}): Promise<AudioListItem[]> {
   try {
-    const { unusedOnly = false, searchText, sortBy = "recent" } = params;
+    const {
+      unusedOnly = false,
+      originalOnly = false,
+      searchText,
+      sortBy = "recent",
+    } = params;
     const userId = params.userId ?? (await getOwner())?.id;
     if (!userId) return [];
 
-    // Fetch all user audios with scoped aggregation counts
+    // Fetch all user audios with scoped aggregation counts and performance stats
     const rows = await db
       .select({
         id: audios.id,
@@ -39,30 +51,59 @@ export async function listAudios(params: ListAudiosParams = {}): Promise<AudioLi
         isOriginal: audios.isOriginal,
         notes: audios.notes,
         createdAt: audios.createdAt,
-        refsCount: sql<number>`(SELECT count(*)::int FROM ${refs} WHERE ${refs.audioId} = ${audios.id} AND ${refs.userId} = ${userId} AND ${refs.archivedAt} IS NULL)`,
-        contentsCount: sql<number>`(SELECT count(*)::int FROM ${contents} WHERE ${contents.audioId} = ${audios.id} AND ${contents.userId} = ${userId} AND ${contents.archivedAt} IS NULL)`,
+        refsCount: sql<number>`(SELECT count(*)::int FROM "refs" r WHERE r.audio_id = "audios"."id" AND r.user_id = ${userId} AND r.archived_at IS NULL)`,
+        contentsCount: sql<number>`(SELECT count(*)::int FROM "contents" c WHERE c.audio_id = "audios"."id" AND c.user_id = ${userId} AND c.archived_at IS NULL)`,
+        archivedRefsCount: sql<number>`(SELECT count(*)::int FROM "refs" r WHERE r.audio_id = "audios"."id" AND r.user_id = ${userId} AND r.archived_at IS NOT NULL)`,
+        archivedContentsCount: sql<number>`(SELECT count(*)::int FROM "contents" c WHERE c.audio_id = "audios"."id" AND c.user_id = ${userId} AND c.archived_at IS NOT NULL)`,
+        postsCount: sql<number>`(
+          SELECT count(*)::int
+          FROM "posts" p
+          JOIN "contents" c ON c.id = p.content_id
+          WHERE c.audio_id = "audios"."id" AND c.user_id = ${userId} AND c.archived_at IS NULL
+        )`,
+        avgRating: sql<number | null>`(
+          SELECT round(avg(c.final_rating)::numeric, 1)::float
+          FROM "contents" c
+          WHERE c.audio_id = "audios"."id"
+            AND c.user_id = ${userId}
+            AND c.archived_at IS NULL
+            AND c.final_rating IS NOT NULL
+        )`,
         lastUsedAt: sql<string | null>`(
           SELECT max(p.posted_at)::text
-          FROM ${posts} p
-          JOIN ${contents} c ON c.id = p.content_id
-          WHERE c.audio_id = ${audios.id} AND c.user_id = ${userId}
+          FROM "posts" p
+          JOIN "contents" c ON c.id = p.content_id
+          WHERE c.audio_id = "audios"."id" AND c.user_id = ${userId}
         )`,
       })
       .from(audios)
       .where(eq(audios.userId, userId));
 
-    let items: AudioListItem[] = rows.map((r) => ({
-      id: r.id,
-      title: r.title,
-      artist: r.artist,
-      isOriginal: r.isOriginal,
-      notes: r.notes,
-      refsCount: r.refsCount || 0,
-      contentsCount: r.contentsCount || 0,
-      lastUsedAt: r.lastUsedAt,
-      isUnused: (r.contentsCount || 0) === 0,
-      createdAt: r.createdAt,
-    }));
+    let items: AudioListItem[] = rows.map((r) => {
+      const refsCount = r.refsCount || 0;
+      const contentsCount = r.contentsCount || 0;
+      const archivedUsageCount =
+        (r.archivedRefsCount || 0) + (r.archivedContentsCount || 0);
+      return {
+        id: r.id,
+        title: r.title,
+        artist: r.artist,
+        isOriginal: r.isOriginal,
+        notes: r.notes,
+        refsCount,
+        contentsCount,
+        postsCount: r.postsCount || 0,
+        avgRating:
+          typeof r.avgRating === "number" && Number.isFinite(r.avgRating)
+            ? r.avgRating
+            : null,
+        archivedUsageCount,
+        canDelete: refsCount === 0 && contentsCount === 0 && archivedUsageCount === 0,
+        lastUsedAt: r.lastUsedAt,
+        isUnused: contentsCount === 0,
+        createdAt: r.createdAt,
+      };
+    });
 
     if (searchText && searchText.trim()) {
       const term = searchText.trim().toLowerCase();
@@ -78,10 +119,30 @@ export async function listAudios(params: ListAudiosParams = {}): Promise<AudioLi
       items = items.filter((i) => i.isUnused);
     }
 
+    if (originalOnly) {
+      items = items.filter((i) => i.isOriginal);
+    }
+
     if (sortBy === "title") {
       items.sort((a, b) => a.title.localeCompare(b.title));
     } else if (sortBy === "refs") {
-      items.sort((a, b) => b.refsCount - a.refsCount);
+      items.sort((a, b) => b.refsCount - a.refsCount || b.createdAt.localeCompare(a.createdAt));
+    } else if (sortBy === "contents") {
+      items.sort(
+        (a, b) =>
+          b.contentsCount - a.contentsCount ||
+          b.refsCount - a.refsCount ||
+          b.createdAt.localeCompare(a.createdAt)
+      );
+    } else if (sortBy === "rating") {
+      items.sort(
+        (a, b) =>
+          (b.avgRating ?? -1) - (a.avgRating ?? -1) ||
+          b.postsCount - a.postsCount ||
+          b.createdAt.localeCompare(a.createdAt)
+      );
+    } else if (sortBy === "newest") {
+      items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     } else {
       items.sort((a, b) => {
         if (a.lastUsedAt && b.lastUsedAt) return b.lastUsedAt.localeCompare(a.lastUsedAt);
@@ -111,7 +172,7 @@ export async function getAudioById(id: string, explicitUserId?: string) {
 
     if (!audio) return null;
 
-    const [usingRefs, usingContents] = await Promise.all([
+    const [usingRefs, usingContents, archivedRefCountRes, archivedContentCountRes] = await Promise.all([
       db
         .select({
           id: refs.id,
@@ -132,19 +193,38 @@ export async function getAudioById(id: string, explicitUserId?: string) {
           id: contents.id,
           title: contents.title,
           status: contents.status,
+          finalRating: contents.finalRating,
           createdAt: contents.createdAt,
-          lastPostedAt: sql<string | null>`(SELECT max(posted_at)::text FROM ${posts} WHERE content_id = ${contents.id})`,
+          lastPostedAt: sql<string | null>`(SELECT max(p.posted_at)::text FROM "posts" p WHERE p.content_id = "contents"."id")`,
         })
         .from(contents)
         .where(and(eq(contents.audioId, id), eq(contents.userId, userId), isNull(contents.archivedAt)))
         .orderBy(desc(contents.createdAt)),
+
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(refs)
+        .where(and(eq(refs.audioId, id), eq(refs.userId, userId), sql`${refs.archivedAt} IS NOT NULL`)),
+
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(contents)
+        .where(and(eq(contents.audioId, id), eq(contents.userId, userId), sql`${contents.archivedAt} IS NOT NULL`)),
     ]);
+
+    const archivedRefsCount = archivedRefCountRes[0]?.count || 0;
+    const archivedContentsCount = archivedContentCountRes[0]?.count || 0;
 
     return {
       audio,
       usingRefs,
       usingContents,
-      canDelete: usingRefs.length === 0 && usingContents.length === 0,
+      archivedUsageCount: archivedRefsCount + archivedContentsCount,
+      canDelete:
+        usingRefs.length === 0 &&
+        usingContents.length === 0 &&
+        archivedRefsCount === 0 &&
+        archivedContentsCount === 0,
     };
   } catch (error) {
     console.warn(`Failed to get audio by ID ${id}:`, error);
