@@ -43,4 +43,6 @@ next-env.d.ts
 # local video clipping workspace assets (not for git or Vercel public deploy)
 /public/Clipping System/
 
+# local PRD notes (keep local only)
 PRD-Folio-v2.md
+PRD-folio-v2.md
